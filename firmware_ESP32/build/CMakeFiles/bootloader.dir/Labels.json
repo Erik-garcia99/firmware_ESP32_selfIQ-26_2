@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader-complete.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule"
+		},
+		{
+			"file" : "/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"bootloader"
+		],
+		"name" : "bootloader"
+	}
+}

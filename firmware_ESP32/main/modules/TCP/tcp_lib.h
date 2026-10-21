@@ -1,0 +1,109 @@
+/* *********************************************
+ *              selfIQ 2026-2
+ *
+ * @autor Erik Garcia Chavez
+ * @date octuber 2026
+ * @assginature : proyecto de carrera
+ * @teacher : Jose Isabel Garcia Rocha
+ *
+ ************************************************* */
+#ifndef TCP_LIB_H
+#define TCP_LIB_H
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+//+++++++++++++++++++++ macros
+
+#define RPI_IP_SETUP "192.168.50.1"
+#define RPI_PORT_SETUP 5000
+
+//+++++++++++++++ bits de grupo de eventos
+
+#define TCP_RETRY_SERVER BIT4
+#define TCP_DISCONNECTED BIT5 // servidor cerro la conexion inesperadamente
+#define TCP_UPDATE BIT6
+#define TCP_FAIL BIT7
+#define TCP_CONNECTED BIT8
+#define TCP_WIFI_UPDATE BIT9
+// #define EXT_TCP_MEM BIT7
+// #define FAIL_TCP_MEM BIT8
+// #define BREAK_UPDATE_WIFI BIT7
+// #define NO_RETRY_TCP BIT8
+
+// +++++++++++++++++++ colas
+extern QueueHandle_t tcp_rx_queue;
+//++++++++++++++++++++++++ grupo de eventos
+
+extern EventGroupHandle_t g_tcp_event_group;
+
+// +++++++++++++++++++++++++estrucutras
+
+/**
+ * @brief estrucutra con  la informacion sobre el proceso/ de la conexion de
+ * socker TCP
+ *
+ * host_ip - direccion IP al servidor a conectarse @memberof tcp_client_t
+ * host_port - puerto del servidor a conectarse @memberof tcp_client_t
+ * sock - descriptor del socket creador @memberof tcp_client_t
+ * connected -  bandera indicando que se realziara la conexion @memberof
+ * tcp_client_t
+ * @logged_in - bandera que indica que se logro loggear al servidor @memberof
+ * tcp_client_t
+ *
+ */
+
+typedef struct {
+  char *host_ip;
+  uint16_t host_port;
+  int sock;
+  int connected;
+} TYPE_TCP_CLIENT_T;
+
+extern TYPE_TCP_CLIENT_T tcp_client;
+
+// +++++++++++++++++++++ funciones
+
+/**
+ * @brief funcion encarga de crear el socket con el que se va a conectar al
+ * servidor. lo intentara 5 veces antes de salir e indicar que no se pudo
+ * conectar
+ *
+ * @param tcp_client es la estrucutra que tiene la informacion del socket de la
+ * conexion con el servidor
+ *
+ * @return ESP_OK cunado se pude establecer la conexion
+ * @return ESP_FAIL cunado no se pudo establecer la conexion
+ *
+ *
+ */
+esp_err_t tcp_cliente_init();
+
+// funcion que debe de realizar el login
+/**
+ * @brief funcion que funcionara para enivar los datos hacia el servidor
+ *
+ * @param sockfd parametro en donde vendra el descriptro con el sokcer abierto
+ * en el momento para enviar la infocmacion
+ * @param msg dentro de esta estrucutra se encontrara la informacion del datos a
+ * enviar, en especial <op> indicando que estrucutra es la que se va a enviar
+ *
+ *
+ *
+ * @return ESP_OK si se envio correctamente
+ * @return ESP_FAIL ocurrio un error en el envio de los datos.
+ *
+ *
+ */
+esp_err_t send_message(void);
+
+// +++++++++++++++++ tareas
+/**
+ * @brief tarea encargada de recibir lo que manda el servidor hacia la ESP
+ *
+ * solo parte el payload en sus respectivas v aribales, mas no anlaiza lo que
+ * llego
+ */
+void recv_task(void *params);
+
+#endif

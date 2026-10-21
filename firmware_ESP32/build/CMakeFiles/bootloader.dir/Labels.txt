@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/CMakeFiles/bootloader-complete.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
