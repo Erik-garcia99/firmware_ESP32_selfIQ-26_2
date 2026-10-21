@@ -16,3 +16,4 @@ dependencies:
   #   public: true
   espressif/mdns: '*'
   espressif/mqtt: '*'
+  espressif/esp32-camera: '*'

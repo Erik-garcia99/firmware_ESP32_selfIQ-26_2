@@ -4,12 +4,14 @@ idf_component_register(
         "modules/WIFI/wifi_lib.c"
         "modules/TCP/tcp_lib.c"
         "modules/MQTT/mqtt_lib.c"
+        "modules/camera/camera_lib.c"
 
     INCLUDE_DIRS
         "."
         "modules/WIFI"
         "modules/TCP"
         "modules/MQTT"
+        "modules/camera"
 
     REQUIRES
         mdns

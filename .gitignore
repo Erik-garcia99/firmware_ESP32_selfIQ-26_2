@@ -1,0 +1,10 @@
+# ESP-IDF
+build/
+**/build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Archivos temporales
+*.log
