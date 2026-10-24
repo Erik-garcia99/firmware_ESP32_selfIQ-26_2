@@ -13,7 +13,8 @@
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/WIFI/wifi_lib.h"
 
-#define NODE_MODULE "led" // Firmware actual: shelf guide
+#define NODE_TYPE "shelf_cam" 
+#define NODE_MODULE "camera" 
 #define MQTT_SETUP_TOPIC "selfiq/esp32_setup"
 #define IDENTITY_NS "selfiq_node"
 
@@ -25,6 +26,8 @@ static char s_reply_topic[96] = {0};
 static char s_esp_id[37] = {0};
 static char s_branch_id[37] = {0};
 static bool s_registered = false;
+static bool s_reply_ready = false;
+static int s_reply_sub_id = -1;
 static bool s_mqtt_connected = false;
 static TaskHandle_t s_retry_task = NULL;
 
@@ -51,9 +54,12 @@ static esp_err_t save_node_identity(void) {
 }
 
 static void send_registration(void) {
-  if (!s_client || !s_mqtt_connected || s_registered) return;
-  int id = esp_mqtt_client_publish(s_client, MQTT_SETUP_TOPIC, s_mac,
-                                   (int)strlen(s_mac), 1, 0);
+  if (!s_client || !s_mqtt_connected || !s_reply_ready || s_registered) return;
+  char payload[96];
+  int len = snprintf(payload, sizeof(payload),
+                     "{\"mac\":\"%s\",\"node_type\":\"%s\"}", s_mac, NODE_TYPE);
+  if (len < 0 || len >= (int)sizeof(payload)) return;
+  int id = esp_mqtt_client_publish(s_client, MQTT_SETUP_TOPIC, payload, len, 1, 0);
   ESP_LOGI(TAG, "Solicitud MQTT: %s MAC=%s (msg_id=%d)", MQTT_SETUP_TOPIC, s_mac, id);
 }
 
@@ -72,11 +78,21 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     case MQTT_EVENT_CONNECTED:
       s_mqtt_connected = true;
       s_registered = false; // Verificar registro en backend cada reconexión (idempotente).
-      esp_mqtt_client_subscribe(s_client, s_reply_topic, 1);
-      send_registration();
+      s_reply_ready = false;
+      s_reply_sub_id = esp_mqtt_client_subscribe(s_client, s_reply_topic, 1);
+      ESP_LOGI(TAG, "MQTT conectado; esperando suscripcion de respuesta (msg_id=%d)", s_reply_sub_id);
+      break;
+    case MQTT_EVENT_SUBSCRIBED:
+      ESP_LOGI(TAG, "Suscripcion MQTT confirmada (msg_id=%d)", event->msg_id);
+      if (s_reply_sub_id >= 0 && event->msg_id == s_reply_sub_id) {
+        s_reply_ready = true;
+        send_registration();
+      }
       break;
     case MQTT_EVENT_DISCONNECTED:
       s_mqtt_connected = false;
+      s_reply_ready = false;
+      s_reply_sub_id = -1;
       s_registered = false;
       ESP_LOGW(TAG, "MQTT desconectado; el cliente reintentará automáticamente");
       break;
@@ -124,7 +140,12 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
 static void registration_retry(void *param) {
   while (1) {
     vTaskDelay(pdMS_TO_TICKS(30000));
-    if (s_mqtt_connected && !s_registered) send_registration();
+    if (s_mqtt_connected && !s_registered) {
+      if (!s_reply_ready)
+        s_reply_sub_id = esp_mqtt_client_subscribe(s_client, s_reply_topic, 1);
+      else
+        send_registration();
+    }
   }
 }
 
