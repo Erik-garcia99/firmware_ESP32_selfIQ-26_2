@@ -26,10 +26,46 @@
 #define TCP_FAIL BIT7
 #define TCP_CONNECTED BIT8
 #define TCP_WIFI_UPDATE BIT9
-// #define EXT_TCP_MEM BIT7
-// #define FAIL_TCP_MEM BIT8
-// #define BREAK_UPDATE_WIFI BIT7
-// #define NO_RETRY_TCP BIT8
+#define TCP_IP_NVS_MIN_SIZE 2U
+
+#define TCP_HEADER_BYTES 2U
+#define TCP_LENGTH_BYTES 1U
+#define TCP_OPERATION_BYTES 1U
+#define TCP_PREFIX_BYTES (TCP_HEADER_BYTES + TCP_LENGTH_BYTES)
+#define TCP_FRAME_OVERHEAD (TCP_PREFIX_BYTES + TCP_OPERATION_BYTES)
+#define TCP_REQUEST_PAYLOAD_LEN TCP_OPERATION_BYTES
+//para sacar el header del frame si es ACK - NACK o HEADER de peticion de RPI->ESP32
+#define TCP_HEADER_HIGH ((HEADER >> 8) & 0xFFU)
+#define TCP_HEADER_LOW (HEADER & 0xFFU)
+#define TCP_ACK_HIGH ((ACK >> 8) & 0xFFU)
+#define TCP_ACK_LOW (ACK & 0xFFU)
+
+// WIFI + eReqWifi = 0x11 -> socilicitar las credencales WIFI 
+#define TCP_WIFI_REQUEST_OP 0x11U
+#define TCP_WIFI_RESPONSE_OP 0x12U
+#define TCP_STATUS_REQUEST_OP 0x41U
+#define TCP_STATUS_RESPONSE_OP 0x42U
+#define TCP_WIFI_MIN_RESPONSE_LEN 6U
+#define TCP_WIFI_RESPONSE_FIELD_OFFSET 3U
+#define TCP_WIFI_FIELD_METADATA_BYTES 2U
+#define TCP_STATUS_RESPONSE_LEN 7U
+#define TCP_STATUS_RESPONSE_VERSION 1U
+#define TCP_STATUS_WIFI_UPDATE_ACTION 2U
+#define TCP_STATUS_BUFFER_SIZE 16U
+#define TCP_RESPONSE_BUFFER_SIZE (MAX_DATA + TCP_OPERATION_BYTES)
+
+
+#define TCP_MAX_CONNECT_ATTEMPTS 5
+#define TCP_CONNECT_RETRY_MS 1000U
+#define TCP_CONNECTION_RETRY_MS 2000U
+#define TCP_SOCKET_TIMEOUT_SEC 5
+#define TCP_MAX_RECV_TIMEOUTS 3
+#define TCP_HEADER_SHIFT 8U
+#define TCP_ACTION_BITS 4U
+#define TCP_NIBBLE_MASK 0x0FU
+#define TCP_NACK_MARKER 0xFFU
+#define TCP_NACK_FRAME_BYTES 5U
+
 
 // +++++++++++++++++++ colas
 extern QueueHandle_t tcp_rx_queue;
@@ -105,5 +141,8 @@ esp_err_t send_message(void);
  * llego
  */
 void recv_task(void *params);
+
+
+int tcp_exchange(uint8_t operation, uint8_t *out, size_t cap);
 
 #endif
