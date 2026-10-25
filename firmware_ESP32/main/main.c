@@ -166,6 +166,14 @@ void app_main(void) {
     ESP_LOGE(TAG, "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra", esp_err_to_name(err));
     return;
   }
+
+  /* Camara independiente de las comunicaciones: una sola inicializacion. */
+  ret = camera_init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Camara no disponible: %s", esp_err_to_name(ret));
+    /* El provisioning WiFi/TCP puede continuar aunque falle la camara. */
+  }
+
   wifi_init_sta();
   bool on_ap = false;
   unsigned rounds = 0;
