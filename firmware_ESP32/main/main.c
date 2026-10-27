@@ -10,36 +10,23 @@
 
 // liberias estanadar
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-
-// logs
-#include "esp_err.h"
+#include <errno.h>
+#include <fcntl.h>
 #include "esp_log.h"
-// recursos ESP
-#include "esp_mac.h"
 #include "esp_system.h"
-
-// flash
-#include "freertos/idf_additions.h"
-#include "freertos/projdefs.h"
-#include "lwip/err.h"
-#include "lwip/sockets.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-
 #include "mdns.h"
-
-// freertos
+#include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-// librerias propias
 #include "global.h"
-#include "modules/TCP/tcp_lib.h"
 #include "modules/WIFI/wifi_lib.h"
+#include "modules/TCP/tcp_lib.h"
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/camera/camera_lib.h"
 #include "portmacro.h"
@@ -52,387 +39,200 @@ QueueHandle_t
 
 //++++++++++++++++++++++++++++++++++ grupo de eventos
 EventGroupHandle_t g_tcp_event_group;
-
-//++++++++++++++++++++++++++++++++ varibales globales
-
-static const char *TAG = "MAIN: ";
-TaskHandle_t recv_task_handle = NULL;
-TaskHandle_t recv_proccess_handle = NULL;
-char g_rpi_ip[16] = {0};
-
-//++++++++++++++++++++++++++++++++ estrucutras
-TYPE_FORMAT_REQUEST_T format_reques = {0};
-TYPE_SEND_INFO_T send_info = {0};
-TYPE_ESP_WIFI_T esp_wifi = {0};
+TaskHandle_t recv_task_handle, recv_proccess_handle;
+TYPE_FORMAT_REQUEST_T format_reques;
+TYPE_SEND_INFO_T send_info;
+TYPE_ESP_WIFI_T esp_wifi;
 TYPE_TCP_CLIENT_T tcp_client = {.sock = -1};
-
-//++++++++++++++++++++++++++++++++++ enums
-
 TYPE_OP_TYPE_T eOp_type;
 ACTION_T eAction;
 TYPE_FRAME_T eType_frame;
 DATA_FIELD_T eData_field_t;
+// igual aqui, se que la ip es de 16 caracteres, y se que siempre era asi, no cambiara, en el caso de IPv4, pero ahora si ahora manerjaremos IPv6, que ond? ya cambia la cosas  no, MACROSSS 
+char g_rpi_ip[IPV4_TEXT_SIZE];
 
-//+++++++++++++++++++++++++++++++funciones
 
-/*********************************/
-/*guardamos un checksum, para identificar la integridad de los datos */
-/*********************************/
-/*
- * @brief funcion que se encarga de actualiuzar las credencuales.
- *
- * */
-esp_err_t update_setup_cred(char *key, void *anchor, uint8_t identifier);
+static const char *TAG = "MAIN";
 
-/**
- * @brief levanta el tcp client.
- */
+static uint64_t legacy_sum(const char *key, const void *anchor, uint8_t type) {
+  uint64_t sum = 0;
+  while (*key) sum += (uint8_t)*key++;
+  if (type == eTCP_CRED) return sum + *(const uint16_t *)anchor;
+  const char *p = anchor;
+  while (*p){
+    sum += (uint8_t)*p++;
+  } 
+  return sum;
+}
 
-esp_err_t setup_tcp(void);
+/* IEEE CRC32, format marker in upper bits. Legacy sums remain readable. */
+static uint32_t crc_byte(uint32_t crc, uint8_t byte) {
+  crc ^= byte;
+  for (int n = 0; n < CRC32_BITS_PER_BYTE; ++n) crc = (crc >> 1) ^ (CRC32_POLYNOMIAL & (0U - (crc & 1U)));
+  return crc;
+}
+uint64_t checksum(const char *key, const void *anchor, uint8_t type) {
+  uint32_t crc = crc_byte(CRC32_INITIAL_VALUE, type);
+  do { 
+    crc = crc_byte(crc, (uint8_t)*key); 
+  }while (*key++);
+  
+  if (type == eTCP_CRED) {
+    uint16_t port = *(const uint16_t *)anchor;
+    crc = crc_byte(crc, port >> CRC32_PORT_HIGH_SHIFT); crc = crc_byte(crc, port & CRC32_PORT_LOW_MASK);
+  } else {
+    const char *p = anchor;
+    do { 
+      crc = crc_byte(crc, (uint8_t)*p); 
+    } while (*p++);
+  }
 
-/*
- * @brief funcion utilizado para inicliazar con credeniclaes por defecto para
- * relizar la comunicacoin con la RPI por medio de socket TCP, para relizar el
- * setup con las credencilaes de la red a utilizar.
- *
- *
- *
- * */
-static esp_err_t setup_credentials_default(uint8_t identifier);
+  return (CRC32_FORMAT_MARKER << CRC32_FORMAT_SHIFT) | (crc ^ CRC32_FINAL_XOR);
+}
 
-static esp_err_t parse_and_apply_wifi_creds(TYPE_FORMAT_REQUEST_T *frame,
-                                            uint8_t *offset);
+static bool checksum_valid(const char *key, const void *anchor, uint8_t type, uint64_t saved) {
+  return saved == checksum(key, anchor, type) ||
+         (saved < CRC32_LEGACY_VALUE_LIMIT && saved == legacy_sum(key, anchor, type));
+}
 
-static esp_err_t connect_to_rpi_ap(void);
+static bool wifi_wait(void) {
+  EventBits_t bits = xEventGroupWaitBits(g_wifi_event_group,
+      WIFI_CONNECTED_BIT | WIFI_FAIL_BIT | WIFI_NO_CREDS_BIT,
+      pdFALSE, pdFALSE, pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
+  return (bits & WIFI_CONNECTED_BIT) && esp_wifi.connected;
+}
 
-//++++++++++++++++++++++++++++++++ tareas
 
-/**
- * @param tarea encargada de decifrar, parsear y taratr los dato recbidisos por
- * el protocolo TCP
- *
- * */
+static bool fetch_wifi(char *ssid, char *password) {
+  uint8_t data[101];
+  int size = tcp_exchange(0x11, data, sizeof(data));
+  if (size < 6 || data[0] != 0x12 || data[1] != eDataSSID) return false;
+  unsigned sl = data[2], pos = 3 + sl;
+  if (!sl || sl > 32 || pos + 2 > (unsigned)size || data[pos] != eDataPSWD) return false;
+  unsigned pl = data[pos + 1];
 
-void tcp_proccess_task(void *params);
+  if (pl < PSWD_LEN_MIN || pl > PSWD_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES + pl != (unsigned)size ||
+      memchr(data + TCP_WIFI_RESPONSE_FIELD_OFFSET, 0, sl) || memchr(data + pos + TCP_WIFI_FIELD_METADATA_BYTES, 0, pl)){
+        return false;
+      } 
 
-void task_wifi_supervisor(void *params);
-void task_broker_discovery(void *params);
+  memcpy(ssid, data + TCP_WIFI_RESPONSE_FIELD_OFFSET, sl); ssid[sl] = 0;
+  memcpy(password, data + pos + TCP_WIFI_FIELD_METADATA_BYTES, pl); password[pl] = 0;
+  
+  return strcmp(ssid, SSID_RPI) != 0;
+}
 
+
+static bool discover_broker(char *ip, uint16_t *port) {
+  const char *hosts[] = {"selfiq-gateway", "raspberrypi", "rackiq-gateway"};
+  if (mdns_init() != ESP_OK) return false;
+  bool found = false;
+  for (int i = 0; i < (int)(sizeof(hosts) / sizeof(hosts[0])) && !found; ++i) {
+    esp_ip4_addr_t addr = {0};
+    if (mdns_query_a(hosts[i], MDNS_QUERY_TIMEOUT_MS, &addr) == ESP_OK && addr.addr) {
+      snprintf(ip, IPV4_TEXT_SIZE, IPSTR, IP2STR(&addr)); found = true;
+    }
+  }
+  if (!found) {
+    mdns_result_t *results = NULL;
+    if (mdns_query_srv("selfiq-broker", "_mqtt", "_tcp", MDNS_QUERY_TIMEOUT_MS, &results) == ESP_OK) {
+      for (mdns_result_t *r = results; r && !found; r = r->next) {
+        if (r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
+          snprintf(ip, IPV4_TEXT_SIZE, IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
+          if (r->port) *port = r->port;
+          found = true;
+        }
+      }
+      mdns_query_results_free(results);
+    }
+  }
+  mdns_free();
+  return found;
+}
 
 void app_main(void) {
-  esp_err_t ret;
-  EventBits_t bits;
-  uint8_t attempts = 0;
-
-  tcp_rx_queue = xQueueCreate(10, sizeof(TYPE_FORMAT_REQUEST_T *));
-  g_tcp_event_group = xEventGroupCreate();
-  configASSERT(tcp_rx_queue != NULL);
-  configASSERT(g_tcp_event_group != NULL);
-
-  /* Un solo consumidor de frames para todos los intentos de TCP. */
-  BaseType_t created = xTaskCreate(tcp_proccess_task, "tcp_proccess_task",
-                                   4096, NULL, 6, &recv_proccess_handle);
-  configASSERT(created == pdPASS);
-
-  ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-      ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
+  /* Do not erase NVS automatically: identity/pending configuration matter. */
+  esp_err_t err = nvs_flash_init();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra", esp_err_to_name(err));
+    return;
   }
-  ESP_ERROR_CHECK(ret);
-
-  /* Camara independiente de las comunicaciones: una sola inicializacion. */
-  ret = camera_init();
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Camara no disponible: %s", esp_err_to_name(ret));
-    /* El provisioning WiFi/TCP puede continuar aunque falle la camara. */
-  }
-
-  /* Stack WiFi primero: crea g_wifi_event_group */
   wifi_init_sta();
-
-  /* Supervisor DESHABILITADO por ahora: app_main maneja reconexion y
-   * reprovisioning. Cuando el flujo este maduro, se puede reactivar solo
-   * para monitoreo pasivo. */
-  // xTaskCreate(task_wifi_supervisor, "wifi_sup", 3072, NULL, 4, NULL);
-
+  bool on_ap = false;
+  unsigned rounds = 0;
+  TickType_t last_probe = 0, last_mqtt = 0;
   while (1) {
-
-    /* ============================================================
-     * FASE 1: intentar con lo que haya en NVS
-     * ============================================================ */
-    ESP_LOGI(TAG, "intentando con credenciales guardadas en NVS");
-    wifi_connect_saved();
-
-    bits = xEventGroupWaitBits(
-        g_wifi_event_group,
-        WIFI_CONNECTED_BIT | WIFI_FAIL_BIT | WIFI_NO_CREDS_BIT, pdTRUE, pdFALSE,
-        pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
-
-    /* ¿En que red estamos? */
-    bool in_real_net = false;
-    bool in_rpi_ap = false;
-
-    if (bits & WIFI_CONNECTED_BIT) {
-      if (esp_wifi.ssid && strcmp(esp_wifi.ssid, SSID_RPI) == 0) {
-        in_rpi_ap = true;
-        ESP_LOGW(TAG, "conectado al AP del RPi '%s' (provisioning pendiente)",
-                 esp_wifi.ssid);
-      } else {
-        in_real_net = true;
-        ESP_LOGI(TAG, "conectado a red real '%s'", esp_wifi.ssid);
-      }
-    } else if (bits & WIFI_NO_CREDS_BIT) {
-      ESP_LOGW(TAG, "sin credenciales validas en NVS");
-    } else if (bits & WIFI_FAIL_BIT) {
-      ESP_LOGW(TAG, "credenciales guardadas no funcionan, borrando");
-      erease_cred_nvs(eWIFI_CRED);
-    }
-
-    if (in_real_net) {
-      ESP_LOGI(TAG, "RED FINAL: '%s' IP=" IPSTR, esp_wifi.ssid,
-               IP2STR(esp_wifi.ip));
-      break; /* salir del while — estamos en la red buena */
-    }
-
-    /* ============================================================
-     * FASE 2: provisioning por TCP (si no estamos ya en el AP del RPi)
-     * ============================================================ */
-    if (!in_rpi_ap) {
-      if (connect_to_rpi_ap() != ESP_OK) {
-        attempts++;
-        ESP_LOGE(TAG, "no se pudo conectar al AP del RPi (%u/5)", attempts);
-        if (attempts >= 5) {
-          ESP_LOGE(TAG, "agotados intentos, reiniciando");
-          esp_restart();
-        }
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        continue;
-      }
-    }
-
-    /* Configurar IP/puerto del RPi (persiste: es estable) */
-    char rpi_ip[] = RPI_IP_SETUP;
-    uint16_t rpi_port = RPI_PORT_SETUP;
-    if (update_setup_cred(rpi_ip, &rpi_port, eTCP_CRED) != ESP_OK) {
-      ESP_LOGE(TAG, "no se pudo configurar IP/puerto del RPi");
-      attempts++;
-      if (attempts >= 5)
-        esp_restart();
-      vTaskDelay(pdMS_TO_TICKS(3000));
-      continue;
-    }
-
-    /* Limpiar bits de TCP antes del nuevo ciclo */
-    xEventGroupClearBits(g_tcp_event_group, TCP_CONNECTED | TCP_FAIL |
-                                                TCP_DISCONNECTED |
-                                                TCP_WIFI_UPDATE);
-
-    /* Levantar TCP + enviar ReqWifi */
-    if (setup_tcp() != ESP_OK) {
-      attempts++;
-      ESP_LOGE(TAG, "setup_tcp fallo (%u/5)", attempts);
-      if (attempts >= 5)
-        esp_restart();
-      vTaskDelay(pdMS_TO_TICKS(3000));
-      continue;
-    }
-
-    /* Esperar credenciales reales por TCP */
-    ESP_LOGI(TAG, "TCP establecido, esperando credenciales reales...");
-    bits = xEventGroupWaitBits(g_tcp_event_group,
-                               TCP_WIFI_UPDATE | TCP_FAIL | TCP_DISCONNECTED,
-                               pdTRUE, pdFALSE,
-                               pdMS_TO_TICKS(TCP_UPDATE_TIMEOUT_MS));
-
-    /* El servidor puede cerrar justo despues de enviar la respuesta;
-       recv_task marca DISCONNECTED antes de que el parser vacie la cola. */
-    if ((bits & TCP_DISCONNECTED) && !(bits & TCP_WIFI_UPDATE)) {
-      bits |= xEventGroupWaitBits(g_tcp_event_group, TCP_WIFI_UPDATE,
-                                  pdTRUE, pdFALSE, pdMS_TO_TICKS(500));
-    }
-
-    if (!(bits & TCP_WIFI_UPDATE)) {
-      attempts++;
-      ESP_LOGE(TAG, "no llegaron credenciales por TCP (%u/5)", attempts);
-      if (attempts >= 5)
-        esp_restart();
-      vTaskDelay(pdMS_TO_TICKS(5000));
-      continue;
-    }
-
-    /* ============================================================
-     * FASE 3: las creds reales ya estan en NVS y en el stack WiFi
-     *         (parse_and_apply_wifi_creds → update_setup_cred →
-     *          wifi_set_credentials + save_credentials).
-     *         wifi_set_credentials ya llamo esp_wifi_connect().
-     *         Solo falta esperar a que conecte o falle.
-     * ============================================================ */
-    ESP_LOGI(TAG, "creds reales recibidas, intentando conectar...");
-    bits = xEventGroupWaitBits(g_wifi_event_group,
-                               WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdTRUE,
-                               pdFALSE, pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
-
-    if (bits & WIFI_CONNECTED_BIT) {
-      ESP_LOGI(TAG, "RED FINAL: '%s' IP=" IPSTR, esp_wifi.ssid,
-               IP2STR(esp_wifi.ip));
-      attempts = 0;
-      break; /* salir del while — exito */
-    }
-
-    /* Las creds reales no funcionaron: borrar y volver a empezar */
-    attempts++;
-    ESP_LOGW(TAG, "creds reales no funcionan (%u/5), reprovisioning", attempts);
-    if (attempts >= 5) {
-      ESP_LOGE(TAG, "agotados intentos, reiniciando");
-      esp_restart();
-    }
-    erease_cred_nvs(eWIFI_CRED);
-    vTaskDelay(pdMS_TO_TICKS(5000));
-  }
-
-  /* ============================================================
-   * Aqui ya estamos en la red real. Por ahora solo se reporta.
-   * Mas adelante: mDNS discovery, broker, etc.
-   * ============================================================ */
-  ESP_LOGI(TAG, "==================================================");
-  ESP_LOGI(TAG, "  RED FINAL: '%s'", esp_wifi.ssid);
-  ESP_LOGI(TAG, "  IP:        " IPSTR, IP2STR(esp_wifi.ip));
-  ESP_LOGI(TAG, "==================================================");
-
-  xTaskCreate(task_broker_discovery, "broker_disc", 4096, NULL, 5, NULL);
-  uint8_t wifi_offline_checks = 0;
-  while (1) {
-    vTaskDelay(pdMS_TO_TICKS(60000));
-    /* Wi-Fi es responsabilidad del stack ESP32, MQTT reintenta por su cuenta.
-       No modificar una STA conectada solo porque Railway/Internet no responda. */
     if (!esp_wifi.connected) {
-      wifi_offline_checks++;
-      if (wifi_offline_checks >= 5) {
-        ESP_LOGE(TAG, "STA sin conexion por 5 verificaciones; reiniciando aprovisionamiento");
-        esp_restart();
+      mqtt_network_stop();
+      if (!on_ap && rounds < WIFI_NETWORK_ROUNDS) {
+        ESP_LOGW(TAG, "[NETWORK] ronda %u/4, hasta 5 intentos", rounds + 1);
+        ++rounds;
+        wifi_connect_saved();
+        if (wifi_wait()){
+           rounds = 0; last_mqtt = 0; 
+           continue; 
+          }
+        if(xEventGroupGetBits(g_wifi_event_group) & WIFI_NO_CREDS_BIT){
+          rounds = WIFI_NETWORK_ROUNDS;
+        } 
+        if (rounds < WIFI_NETWORK_ROUNDS) { 
+          vTaskDelay(pdMS_TO_TICKS(WIFI_ROUND_RETRY_MS)); 
+          continue; 
+        }
+        ESP_LOGE(TAG, "[NETWORK] WIFI_RETRY_EXHAUSTED; buscando AP, sin borrar ni reiniciar");
       }
-      ESP_LOGW(TAG, "STA desconectada; recuperación WiFi intento %u/5", wifi_offline_checks);
-      wifi_connect_saved();
-    } else {
-      wifi_offline_checks = 0;
+      if (wifi_set_credentials(SSID_RPI, PSWD_RPI) == ESP_OK && wifi_wait()) {
+        on_ap = true; last_probe = 0; last_mqtt = 0;
+        ESP_LOGI(TAG, "[NETWORK] LOCAL_AP_READY; broker %s:1883", RPI_IP_SETUP);
+      } else {
+        /* If gateway is absent, occasionally try saved router again. */
+        on_ap = false; rounds = 0;
+        ESP_LOGW(TAG, "[NETWORK] AP_UNREACHABLE; nuevo ciclo en 60s");
+        vTaskDelay(pdMS_TO_TICKS(WIFI_RECOVER_MS));
+      }
+      continue;
     }
+    TickType_t now = xTaskGetTickCount();
+    if (!mqtt_network_connected() && (!last_mqtt || now - last_mqtt >= pdMS_TO_TICKS(WIFI_RECOVER_MS))) {
+      last_mqtt = now;
+      uint16_t port = MQTT_DEFAULT_PORT;
+      char ip[IPV4_TEXT_SIZE] = {0};
+      if (on_ap) snprintf(ip, sizeof(ip), "%s", RPI_IP_SETUP);
+      if (on_ap || discover_broker(ip, &port)) {
+        mqtt_register_start(ip, port); // can change broker without losing queued events
+      } else ESP_LOGW(TAG, "[MQTT] BROKER_NOT_FOUND; nuevo intento en 60s");
+    }
+    if (on_ap && (!last_probe || now - last_probe >= pdMS_TO_TICKS(TCP_UPDATE_TIMEOUT_MS))) {
+      last_probe = now;
+      
+      uint8_t state[TCP_STATUS_BUFFER_SIZE];
+      int n = tcp_exchange(TCP_STATUS_REQUEST_OP, state, sizeof(state));
+
+      if (n == TCP_STATUS_RESPONSE_LEN && state[0] == TCP_STATUS_RESPONSE_OP && state[1] == TCP_STATUS_RESPONSE_VERSION) {
+        ESP_LOGI(TAG, "[TCP] wifi=%u backend=%u mqtt=%u storage=%u action=%u",
+                 state[2], state[3], state[4], state[5], state[6]);
+        if (state[6] == TCP_STATUS_WIFI_UPDATE_ACTION) {
+          char ssid[SSID_LEN_MAX + TEXT_TERMINATOR_SIZE], password[PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE];
+          if (fetch_wifi(ssid, password)) {
+            mqtt_network_stop();
+            if (wifi_set_credentials(ssid, password) == ESP_OK && wifi_wait()) {
+              err = save_credentials(eWIFI_CRED); // commit ONLY after connection succeeds
+              ESP_LOGI(TAG, "[NETWORK] STA_RECOVERED; persistencia=%s", esp_err_to_name(err));
+              on_ap = false; rounds = 0; last_mqtt = 0;
+            } else {
+              ESP_LOGW(TAG, "[NETWORK] STA_TRIAL_FAILED; regresando al AP");
+              wifi_set_credentials(SSID_RPI, PSWD_RPI);
+              wifi_wait();
+              last_mqtt = 0;
+            }
+            memset(password, 0, sizeof(password));
+          }
+        }
+      } else ESP_LOGW(TAG, "[TCP] STATUS_UNAVAILABLE; MQTT local continua, sin reinicio");
+    }
+    vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_DELAY_MS));
   }
 }
-
-// el seungdo parametro represetna en WIFI la contrasneia
-// en TCP represeta en puerto
-// como en uno es string y en otro es numerico, se utiliza de tipoc void* para
-// evitar el problema de casting, accedindo a memoria
-esp_err_t update_setup_cred(char *key, void *anchor, uint8_t identifier) {
-
-  if (identifier == eTCP_CRED) {
-    // entonces debemos de actualizar las credenicales de TCP
-    uint16_t port = *(uint16_t *)anchor;
-
-    tcp_client.host_port = port;
-    char *new_ip = realloc(tcp_client.host_ip, strlen(key) + 1);
-    if (new_ip == NULL) {
-      ESP_LOGE(TAG, "no se pudo reservar memoria para IP TCP");
-      return ESP_ERR_NO_MEM;
-    }
-    tcp_client.host_ip = new_ip;
-    strcpy(tcp_client.host_ip, key);
-
-    // pasamos a guardar los datos en flash.
-    // y regresamos el valor si es que se pudo guardar o no.
-    return save_credentials(eTCP_CRED);
-
-  } else if (identifier == eWIFI_CRED) {
-
-    /*esp_wifi.ssid = realloc(esp_wifi.ssid, strlen(key));
-    esp_err_tp_wifi.pswd = realloc(esp_wifi.pswd, strlen(anchor));*/
-    esp_err_t werr = wifi_set_credentials(key, (const char *)anchor);
-
-    /*infromacionf (esp_wifi.ssid == NULL && esp_wifi.pswd == NULL) {
-      ESP_LOGE(TAG, "sin memoria para asingar credenicales.");
-      return ESP_FAIL;
-    }*/
-    if (werr != ESP_OK) {
-      ESP_LOGE(TAG, "wifi_set_credentials fallo: %s", esp_err_to_name(werr));
-      return werr;
-    }
-
-    // strcpy(esp_wifi.ssid, key);
-    // strcpy(esp_wifi.pswd, anchor);
-    // esp_wifi.connected = 0;
-
-    return save_credentials(eWIFI_CRED);
-  }
-  return ESP_FAIL;
-}
-
-static esp_err_t setup_credentials_default(uint8_t identifier) {
-
-  char *key = NULL;
-  void *anchor = NULL;
-  uint16_t tcp_port = RPI_PORT_SETUP;
-  EventBits_t bits = 0;
-  esp_err_t ret;
-
-  if (identifier == eWIFI_CRED) {
-    key = strdup(SSID_RPI);
-    anchor = strdup(PSWD_RPI);
-    if (!key || !anchor) {
-      free(key);
-      free(anchor);
-      return ESP_ERR_NO_MEM;
-    }
-  } else if (identifier == eTCP_CRED) {
-    key = strdup(RPI_IP_SETUP);
-    anchor = &tcp_port;
-    if (!key)
-      return ESP_ERR_NO_MEM;
-  } else {
-    ESP_LOGE(TAG, "identifier %d invalido", identifier);
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  ret = update_setup_cred(key, anchor, identifier);
-  if (identifier == eWIFI_CRED) {
-    free(key);
-    free(anchor);
-  }
-
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "setup cred fallo (%u): %s", identifier,
-             esp_err_to_name(ret));
-    erease_cred_nvs(identifier);
-    vTaskDelay(pdMS_TO_TICKS(60000));
-    return ESP_FAIL;
-  }
-
-  if (identifier == eWIFI_CRED) {
-    bits = xEventGroupWaitBits(g_wifi_event_group,
-                               WIFI_FAIL_BIT | WIFI_CONNECTED_BIT, pdTRUE,
-                               pdFALSE, portMAX_DELAY);
-    if (bits & WIFI_FAIL_BIT) {
-      erease_cred_nvs(eWIFI_CRED);
-      vTaskDelay(pdMS_TO_TICKS(60000));
-      return ESP_FAIL;
-    }
-    return ESP_OK;
-  }
-
-  /* TCP */
-  setup_tcp();
-  bits = xEventGroupWaitBits(g_tcp_event_group,
-                             TCP_FAIL | TCP_CONNECTED | TCP_DISCONNECTED,
-                             pdTRUE, pdFALSE, portMAX_DELAY);
-  if (bits & TCP_CONNECTED)
-    return ESP_OK;
-
-  if (bits & TCP_FAIL)
-    ESP_LOGE(TAG, "fallo al conectar TCP");
-  return ESP_FAIL;
-}
-
 
 esp_err_t save_credentials(uint8_t identifier) {
   nvs_handle_t h;
@@ -500,6 +300,7 @@ esp_err_t load_cred(uint8_t identifier) {
     uint64_t saved_sum = 0;
     // con buffer NULL, nvs_get_str solo devuelve el tamanio (incluye el '\0')
     ret = nvs_get_str(h, KEY_TCP_IP, NULL, &len);
+    if (ret == ESP_OK && (len < TCP_IP_NVS_MIN_SIZE || len > IPV4_TEXT_SIZE)) ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       ip = malloc(len);
       if (ip == NULL) {
@@ -518,7 +319,7 @@ esp_err_t load_cred(uint8_t identifier) {
     nvs_close(h);
 
     // recalculamos la suma con lo que leimos y la comparamos con la guardada
-    if (ret == ESP_OK && checksum(ip, &port, eTCP_CRED) != saved_sum) {
+    if (ret == ESP_OK && !checksum_valid(ip, &port, eTCP_CRED, saved_sum)) {
       ret = ESP_ERR_INVALID_CRC;
     }
 
@@ -530,6 +331,10 @@ esp_err_t load_cred(uint8_t identifier) {
     free(tcp_client.host_ip);
     tcp_client.host_ip = ip;
     tcp_client.host_port = port;
+    if (saved_sum < CRC32_LEGACY_VALUE_LIMIT) {
+      if (save_credentials(eTCP_CRED) != ESP_OK)
+        ESP_LOGW(TAG, "[INTEGRITY] migracion CRC TCP pendiente");
+    }
     return ESP_OK;
   }
   if (identifier == eWIFI_CRED) {
@@ -538,6 +343,7 @@ esp_err_t load_cred(uint8_t identifier) {
     uint64_t saved_sum = 0;
 
     ret = nvs_get_str(h, KEY_WIFI_SSID, NULL, &len_s);
+    if (ret == ESP_OK && (len_s < 2 || len_s > SSID_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       ssid = malloc(len_s);
       if (!ssid)
@@ -547,6 +353,7 @@ esp_err_t load_cred(uint8_t identifier) {
       ret = nvs_get_str(h, KEY_WIFI_SSID, ssid, &len_s);
     if (ret == ESP_OK)
       ret = nvs_get_str(h, KEY_WIFI_PSWD, NULL, &len_p);
+    if (ret == ESP_OK && (len_p < PSWD_LEN_MIN + TEXT_TERMINATOR_SIZE || len_p > PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       pswd = malloc(len_p);
       if (!pswd)
@@ -558,7 +365,7 @@ esp_err_t load_cred(uint8_t identifier) {
       ret = nvs_get_u64(h, KEY_WIFI_SUM, &saved_sum);
     nvs_close(h);
 
-    if (ret == ESP_OK && checksum(ssid, pswd, eWIFI_CRED) != saved_sum)
+    if (ret == ESP_OK && !checksum_valid(ssid, pswd, eWIFI_CRED, saved_sum))
       ret = ESP_ERR_INVALID_CRC;
     if (ret != ESP_OK) {
       free(ssid);
@@ -571,6 +378,10 @@ esp_err_t load_cred(uint8_t identifier) {
     esp_wifi.ssid = ssid;
     esp_wifi.pswd = pswd;
     esp_wifi.connected = 0;
+    if (saved_sum < CRC32_LEGACY_VALUE_LIMIT) {
+      if (save_credentials(eWIFI_CRED) != ESP_OK)
+        ESP_LOGW(TAG, "[INTEGRITY] migracion CRC WIFI pendiente");
+    }
     return ESP_OK;
   }
   // algo parecido sera con wifi, mas o menos.
@@ -597,7 +408,7 @@ esp_err_t erease_cred_nvs(uint8_t identifier) {
     return ESP_ERR_INVALID_ARG;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < (int)(sizeof(keys_wifi) / sizeof(keys_wifi[0])); ++i) {
     ret = nvs_erase_key(h, keys[i]);
     if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
       nvs_close(h);
@@ -609,303 +420,3 @@ esp_err_t erease_cred_nvs(uint8_t identifier) {
   return ret;
 }
 
-// vamos a sumar los valores, totales de los datos
-// SSID + pswd
-// IP + PORT
-uint64_t checksum(const char *key, const void *anchor, uint8_t identifier) {
-  uint64_t total = 0;
-
-  // key siempre es un string (SSID o IP): sumamos el valor de cada caracter
-  for (size_t i = 0; key[i] != '\0'; i++) {
-    total += (uint8_t)key[i];
-  }
-
-  if (identifier == eTCP_CRED) {
-    // anchor es el puerto: es un numero, se suma directo
-    total += *(const uint16_t *)anchor;
-
-  } else if (identifier == eWIFI_CRED) {
-    // anchor es la contrasenia: otro string, se suma caracter por caracter
-    const char *pswd = (const char *)anchor;
-    for (size_t i = 0; pswd[i] != '\0'; i++) {
-      total += (uint8_t)pswd[i];
-    }
-  }
-
-  return total;
-}
-
-esp_err_t setup_tcp(void) {
-  esp_err_t ret;
-  int attempts = 0;
-  const int max_attempts = 3;
-
-  while (attempts < max_attempts) {
-    ret = tcp_cliente_init();
-
-    if (ret != ESP_OK) {
-      attempts++;
-      ESP_LOGW(TAG, "TCP connect fallo (intento %d/%d)", attempts,
-               max_attempts);
-      vTaskDelay(pdMS_TO_TICKS(3000));
-      continue;
-    }
-
-    /* Peticion inicial: AB CD 01 11. Enviar antes de crear recv_task;
-       la respuesta quedara en el buffer del socket hasta que lo leamos. */
-    memset(&send_info, 0, sizeof(send_info));
-    send_info.op_type = OPReqCredWifi;
-    send_info.format_request.header = HEADER;
-    send_info.format_request.len = 1;
-    send_info.format_request.type_frame = eWifi;
-    send_info.format_request.action = eReqWifi;
-
-    ESP_LOGI(TAG, "solicitando credenciales WiFi a la RPi (AB CD 01 11)");
-
-    if (send_message() == ESP_OK) {
-      BaseType_t created = xTaskCreate(recv_task, "recv_task", 3072, NULL,
-                                       5, &recv_task_handle);
-      if (created != pdPASS) {
-        ESP_LOGE(TAG, "no se pudo crear recv_task");
-        close(tcp_client.sock);
-        tcp_client.sock = -1;
-        tcp_client.connected = 0;
-        return ESP_ERR_NO_MEM;
-      }
-      xEventGroupSetBits(g_tcp_event_group, TCP_CONNECTED);
-      return ESP_OK;
-    }
-
-    /* send fallo: limpiar y reintentar */
-    ESP_LOGE(TAG, "send_message fallo, cerrando socket y reintentando");
-    if (tcp_client.sock >= 0) {
-      close(tcp_client.sock);
-      tcp_client.sock = -1;
-    }
-    tcp_client.connected = 0;
-    xEventGroupClearBits(g_tcp_event_group, TCP_CONNECTED);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    attempts++;
-  }
-
-  ESP_LOGE(TAG, "setup_tcp: agotados %d intentos", max_attempts);
-  xEventGroupSetBits(g_tcp_event_group, TCP_FAIL);
-  return ESP_FAIL;
-}
-
-/* ------------------------------------------------------------------ */
-/* parser credenciales WiFi (solo red normal)                          */
-/* formato: |id_ssid|len|SSID|id_pswd|len|pswd|                       */
-/* ------------------------------------------------------------------ */
-static esp_err_t parse_and_apply_wifi_creds(TYPE_FORMAT_REQUEST_T *frame,
-                                            uint8_t *offset) {
-  uint8_t id, len;
-  char *ssid = NULL, *pswd = NULL;
-  esp_err_t ret = ESP_FAIL;
-  size_t total = (frame->len >= 1) ? (size_t)(frame->len - 1) : 0;
-
-  /* LEN incluye type|action; los TLV viven en data[0..total-1]. */
-  if (total < 4 || total > MAX_DATA)
-    return ESP_ERR_INVALID_SIZE;
-
-  /* SSID */
-  if ((size_t)(*offset) + 2 > total)
-    return ESP_ERR_INVALID_SIZE;
-  id = frame->data[(*offset)++];
-  if (id != eDataSSID)
-    return ESP_ERR_INVALID_ARG;
-  len = frame->data[(*offset)++];
-  if (len == 0 || len > SSID_LEN_MAX || (size_t)*offset + len > total)
-    return ESP_ERR_INVALID_SIZE;
-  ssid = malloc(len + 1);
-  if (!ssid)
-    return ESP_ERR_NO_MEM;
-  memcpy(ssid, &frame->data[*offset], len);
-  *offset += len;
-  ssid[len] = '\0';
-
-  /* Contraseña */
-  if ((size_t)(*offset) + 2 > total)
-    goto done;
-  id = frame->data[(*offset)++];
-  if (id != eDataPSWD)
-    goto done;
-  len = frame->data[(*offset)++];
-  if (len < PSWD_LEN_MIN || len > PSWD_LEN_MAX ||
-      (size_t)*offset + len != total)
-    goto done;
-  pswd = malloc(len + 1);
-  if (!pswd) {
-    ret = ESP_ERR_NO_MEM;
-    goto done;
-  }
-  memcpy(pswd, &frame->data[*offset], len);
-  *offset += len;
-  pswd[len] = '\0';
-
-  /* El AP solo se usa temporalmente; jamas se guarda como red normal. */
-  if (strcmp(ssid, SSID_RPI) == 0) {
-    ESP_LOGE(TAG, "la RPi envio SSID del AP en lugar del WiFi normal");
-    ret = ESP_ERR_INVALID_ARG;
-    goto done;
-  }
-  ESP_LOGI(TAG, "credenciales recibidas para SSID='%s'", ssid);
-  ret = update_setup_cred(ssid, pswd, eWIFI_CRED);
-
-done:
-  free(ssid);
-  free(pswd);
-  return ret;
-}
-
-// tareas
-
-void tcp_proccess_task(void *params) {
-  TYPE_FORMAT_REQUEST_T *frame = NULL;
-
-  while (1) {
-    if (xQueueReceive(tcp_rx_queue, &frame, portMAX_DELAY) != pdTRUE)
-      continue;
-    if (frame == NULL)
-      continue;
-
-    if (frame->header == ACK && frame->len == 0xFF &&
-        frame->type_frame == eRespACK) {
-      ESP_LOGE(TAG, "RPi devolvio NACK de protocolo");
-      xEventGroupSetBits(g_tcp_event_group, TCP_FAIL);
-    } else if (frame->header == ACK && frame->type_frame == eWifi &&
-               frame->action == eRespWifi) {
-      uint8_t offset = 0;
-      esp_err_t ret = parse_and_apply_wifi_creds(frame, &offset);
-      if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "credenciales normales recibidas y guardadas en NVS");
-        xEventGroupSetBits(g_tcp_event_group, TCP_WIFI_UPDATE);
-      } else {
-        ESP_LOGE(TAG, "credenciales TCP invalidas: %s",
-                 esp_err_to_name(ret));
-        xEventGroupSetBits(g_tcp_event_group, TCP_FAIL);
-      }
-    } else {
-      ESP_LOGW(TAG, "frame inesperado: header=%04X type=%u action=%u",
-               frame->header, (unsigned)frame->type_frame,
-               (unsigned)frame->action);
-    }
-
-    vPortFree(frame);
-    frame = NULL;
-  }
-}
-
-void task_wifi_supervisor(void *param) {
-  uint8_t tries = 0;
-
-  while (1) {
-    EventBits_t bits = xEventGroupWaitBits(
-        g_wifi_event_group, WIFI_FAIL_BIT | WIFI_CONNECTED_BIT, pdFALSE,
-        pdFALSE, pdMS_TO_TICKS(WIFI_RECOVER_MS));
-
-    if (bits & WIFI_FAIL_BIT) {
-      xEventGroupClearBits(g_wifi_event_group, WIFI_FAIL_BIT);
-      tries++;
-      ESP_LOGW(TAG, "WiFi caido (intento %u/%u)", tries, WIFI_RECOVER_TRIES);
-
-      if (tries >= WIFI_RECOVER_TRIES) {
-        ESP_LOGE(TAG, "agotados reintentos, borrando creds y reiniciando");
-        erease_cred_nvs(eWIFI_CRED);
-        esp_restart();
-      } else {
-        vTaskDelay(pdMS_TO_TICKS(WIFI_RECOVER_MS));
-        wifi_connect_saved();
-      }
-    } else if (bits & WIFI_CONNECTED_BIT) {
-      tries = 0;
-    }
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* task_broker_discovery (mDNS)                                         */
-/* ------------------------------------------------------------------ */
-void task_broker_discovery(void *pv) {
-  const char *hosts[] = {"selfiq-gateway", "raspberrypi", "rackiq-gateway"};
-
-  while (1) {
-    char ip[16] = {0};
-    bool found = false;
-    uint16_t broker_port = 1883;
-
-    if (mdns_init() == ESP_OK) {
-      esp_ip4_addr_t addr = {0};
-
-      for (int i = 0; i < 3 && !found; i++) {
-        if (mdns_query_a(hosts[i], 3000, &addr) == ESP_OK && addr.addr) {
-          snprintf(ip, sizeof(ip), IPSTR, IP2STR(&addr));
-          found = true;
-        }
-      }
-
-      if (!found) {
-        mdns_result_t *res = NULL;
-        if (mdns_query_srv("selfiq-broker", "_mqtt", "_tcp", 3000, &res) ==
-                ESP_OK &&
-            res) {
-          for (mdns_result_t *r = res; r; r = r->next) {
-            if (r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
-              snprintf(ip, sizeof(ip), IPSTR,
-                       IP2STR(&r->addr->addr.u_addr.ip4));
-              found = true;
-              if (r->port) broker_port = r->port;
-              break;
-            }
-          }
-          mdns_query_results_free(res);
-        }
-      }
-      mdns_free();
-    }
-
-    if (found) {
-      ESP_LOGI(TAG, "RPi en red normal: %s", ip);
-      strncpy(g_rpi_ip, ip, sizeof(g_rpi_ip) - 1);
-      ESP_LOGI(TAG, "iniciando registro MQTT con gateway %s:%u", g_rpi_ip, (unsigned)broker_port);
-      if (mqtt_register_start(g_rpi_ip, broker_port) != ESP_OK) {
-        ESP_LOGE(TAG, "falló iniciar cliente MQTT; reintento mDNS");
-        vTaskDelay(pdMS_TO_TICKS(30000));
-        continue;
-      }
-      vTaskDelete(NULL);
-      return;
-    }
-
-    ESP_LOGW(TAG, "mDNS sin resultados, reintento en 30 s");
-    vTaskDelay(pdMS_TO_TICKS(30000));
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Conecta al AP de provisioning del RPi SIN persistir en NVS.        */
-/* Usa wifi_set_credentials() directo, NO update_setup_cred(), para   */
-/* que SelfIQ-Admi no se guarde como si fuera la red real.            */
-/* ------------------------------------------------------------------ */
-static esp_err_t connect_to_rpi_ap(void) {
-  ESP_LOGI(TAG, "conectando al AP del RPi '%s'", SSID_RPI);
-
-  esp_err_t err = wifi_set_credentials(SSID_RPI, PSWD_RPI);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "wifi_set_credentials(SelfIQ-Admi) fallo: %s",
-             esp_err_to_name(err));
-    return err;
-  }
-
-  EventBits_t bits = xEventGroupWaitBits(
-      g_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdTRUE, pdFALSE,
-      pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
-
-  if (bits & WIFI_CONNECTED_BIT) {
-    ESP_LOGI(TAG, "conectado al AP del RPi, IP=" IPSTR, IP2STR(esp_wifi.ip));
-    return ESP_OK;
-  }
-
-  ESP_LOGE(TAG, "no se pudo conectar al AP del RPi");
-  return ESP_FAIL;
-}

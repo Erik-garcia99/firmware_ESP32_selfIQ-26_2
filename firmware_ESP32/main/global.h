@@ -23,6 +23,29 @@
 #define SSID_LEN_MAX 32
 #define PSWD_LEN_MAX 63
 #define PSWD_LEN_MIN 8
+#define TEXT_TERMINATOR_SIZE 1U
+#define IPV4_TEXT_SIZE 16U /* 15 caracteres IPv4 + terminador */
+
+#define UUID_TEXT_LEN 36U
+#define UUID_TEXT_SIZE (UUID_TEXT_LEN + TEXT_TERMINATOR_SIZE)
+#define UUID_DASH_1 8U
+#define UUID_DASH_2 13U
+#define UUID_DASH_3 18U
+#define UUID_DASH_4 23U
+
+
+#define CRC32_BITS_PER_BYTE 8U
+#define CRC32_POLYNOMIAL 0xEDB88320U
+#define CRC32_INITIAL_VALUE 0xFFFFFFFFU
+#define CRC32_FINAL_XOR 0xFFFFFFFFU
+#define CRC32_FORMAT_MARKER UINT64_C(0x53495101)
+#define CRC32_FORMAT_SHIFT 32U
+#define CRC32_LEGACY_VALUE_LIMIT UINT64_C(0x100000000)
+#define CRC32_PORT_HIGH_SHIFT 8U
+#define CRC32_PORT_LOW_MASK 0xFFU
+
+#define MAIN_LOOP_DELAY_MS 1000U
+
 
 // namespace propio en NVS donde guardamos nuestros datos y sus checksums
 #define NVS_NS "selfiq_cfg"
@@ -80,10 +103,8 @@ typedef enum {
 extern DATA_FIELD_T eData_field_t;
 
 typedef enum {
-
   eWIFI_CRED,
   eTCP_CRED,
-
 } CRED_UPDATE_T;
 extern CRED_UPDATE_T eCredSave;
 

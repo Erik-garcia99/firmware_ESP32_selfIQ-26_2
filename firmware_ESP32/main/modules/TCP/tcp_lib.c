@@ -34,6 +34,7 @@
 #include "modules/TCP/tcp_lib.h"
 
 //+++++++++++++++++++++ varibales globales
+
 const char *TAG = "TCP_CLIENT : ";
 
 // funciones
@@ -47,7 +48,7 @@ esp_err_t tcp_cliente_init() {
     tcp_client.sock = -1;
   }
 
-  for (int n_retry = 0; n_retry < 5; n_retry++) {
+  for (int n_retry = 0; n_retry < TCP_MAX_CONNECT_ATTEMPTS; n_retry++) {
 
     ESP_LOGI(TAG, "intento %d de establecer conexion", n_retry);
 
@@ -55,11 +56,11 @@ esp_err_t tcp_cliente_init() {
     tcp_client.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (tcp_client.sock < 0) {
       ESP_LOGE(TAG, "error al crear el descriptor del socket(): %d", errno);
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      vTaskDelay(pdMS_TO_TICKS(TCP_CONNECT_RETRY_MS));
       continue; // saltamos todo y se vuelve a intentar.
     }
     // timeout de recv
-    struct timeval timeout = {.tv_sec = 5, .tv_usec = 0};
+    struct timeval timeout = {.tv_sec = TCP_SOCKET_TIMEOUT_SEC, .tv_usec = 0};
     setsockopt(tcp_client.sock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
                sizeof(timeout));
 
@@ -77,7 +78,7 @@ esp_err_t tcp_cliente_init() {
       ESP_LOGE(TAG, "descriptor <connect()> fallo  %d", errno);
       close(tcp_client.sock);
       tcp_client.sock = -1;
-      vTaskDelay(pdMS_TO_TICKS(2000));
+      vTaskDelay(pdMS_TO_TICKS(TCP_CONNECTION_RETRY_MS));
       continue;
     }
 
@@ -110,7 +111,7 @@ static bool recv_exact(int sock, uint8_t *dst, size_t total) {
     } else if (errno == EINTR) {
       continue;
     } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (++timeouts >= 3)
+      if (++timeouts >= TCP_MAX_RECV_TIMEOUTS)
         return false;
     } else {
       ESP_LOGE(TAG, "recv fallo errno=%d", errno);
@@ -120,27 +121,28 @@ static bool recv_exact(int sock, uint8_t *dst, size_t total) {
   return true;
 }
 
+// la cola de los datos que llegan a donde los esta envinado, no veo que se use en otro lugar mas que aqui, no como mi codigo original, que hacia una cola con una copia de los datos que llegaban y los enviaba a otra tarea en main.c y ahi se decodificadbaa y se decidia con forme al coentenido del frame. 
 void recv_task(void *params) {
   int sock = tcp_client.sock;
-  uint8_t hdr[4];
+  uint8_t hdr[TCP_FRAME_OVERHEAD];
 
   while (1) {
     /* Cabecera 2B + LEN 1B + TYPE|ACTION 1B. */
     if (!recv_exact(sock, hdr, sizeof(hdr)))
       break;
 
-    uint16_t head = ((uint16_t)hdr[0] << 8) | hdr[1];
+    uint16_t head = ((uint16_t)hdr[0] << TCP_HEADER_SHIFT) | hdr[1];
     uint8_t frame_len = hdr[2];
-    uint8_t type = (hdr[3] >> 4) & 0x0F;
-    uint8_t action = hdr[3] & 0x0F;
-    bool is_nack = (head == ACK && frame_len == 0xFF &&
-                    type == 0x0F && action == 0x0F);
+    uint8_t type = (hdr[3] >> TCP_ACTION_BITS) & TCP_NIBBLE_MASK;
+    uint8_t action = hdr[3] & TCP_NIBBLE_MASK;
+    bool is_nack = (head == ACK && frame_len == TCP_NACK_MARKER &&
+                    type == TCP_NIBBLE_MASK && action == TCP_NIBBLE_MASK);
 
     if (head != HEADER && head != ACK) {
       ESP_LOGE(TAG, "header TCP invalido: 0x%04X", head);
       break;
     }
-    if (!is_nack && (frame_len < 1 || frame_len > MAX_DATA + 1)) {
+    if (!is_nack && (frame_len < TCP_OPERATION_BYTES || frame_len > MAX_DATA + TCP_OPERATION_BYTES)) {
       ESP_LOGE(TAG, "LEN TCP invalido: %u", frame_len);
       break;
     }
@@ -158,7 +160,7 @@ void recv_task(void *params) {
 
     /* NACK legado incluye 1 byte de relleno; las respuestas normales usan
        LEN = type|action (1B) + datos. */
-    size_t data_len = is_nack ? 1 : (size_t)(frame_len - 1);
+    size_t data_len = is_nack ? TCP_OPERATION_BYTES : (size_t)(frame_len - TCP_OPERATION_BYTES);
     if (data_len > 0 && !recv_exact(sock, frame->data, data_len)) {
       vPortFree(frame);
       break;
@@ -186,7 +188,7 @@ void recv_task(void *params) {
 
 esp_err_t send_message(void) {
   TYPE_FORMAT_REQUEST_T *f = &send_info.format_request;
-  uint8_t buffer[4 + MAX_DATA];
+  uint8_t buffer[TCP_FRAME_OVERHEAD + MAX_DATA];
   int offset = 0;
 
   if (tcp_client.sock < 0) {
@@ -197,20 +199,20 @@ esp_err_t send_message(void) {
   if (send_info.op_type == OP_NACK) {
     /* NACK: wire = 54 33 FF FF 00 (LEN=0xFF, type=0xF, action=0xF, 1 byte pad)
      */
-    buffer[0] = (ACK >> 8) & 0xFF;
-    buffer[1] = ACK & 0xFF;
-    buffer[2] = 0xFF;
-    buffer[3] = 0xFF;
+    buffer[0] = TCP_ACK_HIGH;
+    buffer[1] = TCP_ACK_LOW;
+    buffer[2] = TCP_NACK_MARKER;
+    buffer[3] = TCP_NACK_MARKER;
     buffer[4] = 0x00;
-    offset = 5;
+    offset = TCP_NACK_FRAME_BYTES;
   } else {
     /* HEADER big-endian */
     uint16_t h_be = htons(f->header);
-    memcpy(buffer + offset, &h_be, 2);
-    offset += 2;
+    memcpy(buffer + offset, &h_be, TCP_HEADER_BYTES);
+    offset += TCP_HEADER_BYTES;
 
     /* LEN = 1 (byte type|action) + N (data) */
-    if (f->len < 1) {
+    if (f->len < TCP_OPERATION_BYTES) {
       ESP_LOGE(TAG, "send_message: LEN invalido (%u)", f->len);
       return ESP_FAIL;
     }
@@ -218,9 +220,9 @@ esp_err_t send_message(void) {
 
     /* Byte type|action — HIGH nibble = type, LOW = action (como lee la RPi) */
     buffer[offset++] =
-        ((uint8_t)(f->type_frame & 0x0F) << 4) | ((uint8_t)(f->action & 0x0F));
+        ((uint8_t)(f->type_frame & TCP_NIBBLE_MASK) << TCP_ACTION_BITS) | ((uint8_t)(f->action & TCP_NIBBLE_MASK));
 
-    uint8_t data_len = f->len - 1;
+    uint8_t data_len = f->len - TCP_OPERATION_BYTES;
     if (data_len > MAX_DATA) {
       ESP_LOGE(TAG, "send_message: data_len > MAX_DATA (%u)", data_len);
       return ESP_FAIL;
@@ -245,4 +247,63 @@ esp_err_t send_message(void) {
   ESP_LOGI(TAG, "TX %d B  header=0x%04X len=%u type=%u action=%u", total,
            f->header, f->len, (unsigned)f->type_frame, (unsigned)f->action);
   return ESP_OK;
+}
+
+
+
+
+
+/* Bounded connect + exact reads: handles partial TCP frames, no helper tasks. */
+
+// es mas esta funcion para que funciona exactamente?
+int tcp_exchange(uint8_t operation, uint8_t *out, size_t cap) {
+  int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+  if (sock < 0){
+    return -1;
+  } 
+
+  struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = htons(RPI_PORT_SETUP)};
+  inet_pton(AF_INET, RPI_IP_SETUP, &address.sin_addr);
+  int flags = fcntl(sock, F_GETFL, 0);
+  fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+  int rc = connect(sock, (struct sockaddr *)&address, sizeof(address));
+  if (rc < 0 && errno != EINPROGRESS) goto fail;
+  if (rc < 0) {
+    fd_set writable; FD_ZERO(&writable); FD_SET(sock, &writable);
+    struct timeval timeout = {.tv_sec = TCP_SOCKET_TIMEOUT_SEC};
+    if (select(sock + 1, NULL, &writable, NULL, &timeout) <= 0) goto fail;
+    int error = 0; socklen_t len = sizeof(error);
+    if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error) goto fail;
+  }
+  fcntl(sock, F_SETFL, flags);
+  struct timeval timeout = {.tv_sec = TCP_SOCKET_TIMEOUT_SEC};
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  //el 1 de dnde lo saca?, porue no usar como lo tenia antes, con memset y esas ondas, 
+
+  const uint8_t request[] = {TCP_HEADER_HIGH, TCP_HEADER_LOW, TCP_REQUEST_PAYLOAD_LEN, operation};
+  
+  for (size_t sent = 0; sent < sizeof(request);) {
+    int n = send(sock, request + sent, sizeof(request) - sent, 0);
+    if (n <= 0) goto fail;
+    sent += n;
+  }
+  uint8_t prefix[TCP_PREFIX_BYTES];
+  for (size_t got = 0; got < sizeof(prefix);) {
+    int n = recv(sock, prefix + got, sizeof(prefix) - got, 0);
+    if (n <= 0) goto fail;
+    got += n;
+  }
+  //los valores de los arreglos de donde los saca?
+  if (prefix[0] != TCP_ACK_HIGH || prefix[1] != TCP_ACK_LOW || prefix[2] == 0 || prefix[2] > cap) goto fail;
+  for (size_t got = 0; got < prefix[2];) {
+    int n = recv(sock, out + got, prefix[2] - got, 0);
+    if (n <= 0) goto fail;
+    got += n;
+  }
+  close(sock);
+  return prefix[2];
+fail:
+  close(sock);
+  return -1;
 }
