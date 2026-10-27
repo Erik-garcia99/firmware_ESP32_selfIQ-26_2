@@ -60,14 +60,11 @@ static uint64_t legacy_sum(const char *key, const void *anchor, uint8_t type) {
 }
 
 /* IEEE CRC32, format marker in upper bits. Legacy sums remain readable. */
-// los numeros magicos no deben de estar asi, como en esta comparacion en el for, macro, varibale o constante no magic numbers. 
 static uint32_t crc_byte(uint32_t crc, uint8_t byte) {
   crc ^= byte;
   for (int n = 0; n < CRC32_BITS_PER_BYTE; ++n) crc = (crc >> 1) ^ (CRC32_POLYNOMIAL & (0U - (crc & 1U)));
   return crc;
 }
-
-/** que onda con este ehcksum explica que tantas numeros tan largos y especificos  */
 uint64_t checksum(const char *key, const void *anchor, uint8_t type) {
   uint32_t crc = crc_byte(CRC32_INITIAL_VALUE, type);
   do { 
@@ -99,25 +96,13 @@ static bool wifi_wait(void) {
   return (bits & WIFI_CONNECTED_BIT) && esp_wifi.connected;
 }
 
-/***
- * 
- * @ de donde saca los numeros que onda?, que esta haceindo esta coasa?
- * 
- */
+
 static bool fetch_wifi(char *ssid, char *password) {
-  uint8_t data[TCP_RESPONSE_BUFFER_SIZE];
-
-  int size = tcp_exchange(TCP_WIFI_REQUEST_OP, data, sizeof(data));
-  // de donde se saca ese 0? si indicas el ID, se supone que primero es el ID, en el frame en la aprte de data, primero ID del SSID, despues el len el tamanio del dato de LEN 
-
-  //y lo mismo para password. 
-  //entnces este 16 y el 6 de donde se lo saca? 
-  //estas poneind al reves el frame como te lo mande? 
-  if (size < TCP_WIFI_MIN_RESPONSE_LEN || data[0] != TCP_WIFI_RESPONSE_OP || data[1] != eDataSSID) return false;
-
-  unsigned sl = data[2], pos = TCP_WIFI_RESPONSE_FIELD_OFFSET + sl;
-
-  if (!sl || sl > SSID_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES > (unsigned)size || data[pos] != eDataPSWD) return false;
+  uint8_t data[101];
+  int size = tcp_exchange(0x11, data, sizeof(data));
+  if (size < 6 || data[0] != 0x12 || data[1] != eDataSSID) return false;
+  unsigned sl = data[2], pos = 3 + sl;
+  if (!sl || sl > 32 || pos + 2 > (unsigned)size || data[pos] != eDataPSWD) return false;
   unsigned pl = data[pos + 1];
 
   if (pl < PSWD_LEN_MIN || pl > PSWD_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES + pl != (unsigned)size ||
@@ -166,14 +151,6 @@ void app_main(void) {
     ESP_LOGE(TAG, "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra", esp_err_to_name(err));
     return;
   }
-
-  /* Camara independiente de las comunicaciones: una sola inicializacion. */
-  ret = camera_init();
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Camara no disponible: %s", esp_err_to_name(ret));
-    /* El provisioning WiFi/TCP puede continuar aunque falle la camara. */
-  }
-
   wifi_init_sta();
   bool on_ap = false;
   unsigned rounds = 0;
@@ -223,9 +200,7 @@ void app_main(void) {
       last_probe = now;
       
       uint8_t state[TCP_STATUS_BUFFER_SIZE];
-      // de dide sakca este 41
       int n = tcp_exchange(TCP_STATUS_REQUEST_OP, state, sizeof(state));
-      //de dide el 42?
 
       if (n == TCP_STATUS_RESPONSE_LEN && state[0] == TCP_STATUS_RESPONSE_OP && state[1] == TCP_STATUS_RESPONSE_VERSION) {
         ESP_LOGI(TAG, "[TCP] wifi=%u backend=%u mqtt=%u storage=%u action=%u",
