@@ -158,6 +158,11 @@ void app_main(void) {
     return;
   }
   wifi_init_sta();
+  /* La captura tiene su propia tarea y no depende de Internet/MQTT. */
+  err = camera_start_task();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "No se pudo crear tarea de camara: %s", esp_err_to_name(err));
+  }
   bool on_ap = false;
   unsigned rounds = 0;
   TickType_t last_probe = 0, last_mqtt = 0;
