@@ -28,6 +28,7 @@
 #include "modules/WIFI/wifi_lib.h"
 #include "modules/TCP/tcp_lib.h"
 #include "modules/MQTT/mqtt_lib.h"
+#include "modules/camera/camera_lib.h"
 
 /* Globals kept for the existing TCP library; recovery exchanges below have a
  * private socket and never run recv_task concurrently on that socket. */
@@ -42,7 +43,6 @@ TYPE_OP_TYPE_T eOp_type;
 ACTION_T eAction;
 TYPE_FRAME_T eType_frame;
 DATA_FIELD_T eData_field_t;
-// igual aqui, se que la ip es de 16 caracteres, y se que siempre era asi, no cambiara, en el caso de IPv4, pero ahora si ahora manerjaremos IPv6, que ond? ya cambia la cosas  no, MACROSSS 
 char g_rpi_ip[IPV4_TEXT_SIZE];
 
 
@@ -98,12 +98,12 @@ static bool wifi_wait(void) {
 
 
 static bool fetch_wifi(char *ssid, char *password) {
-  uint8_t data[101];
-  int size = tcp_exchange(0x11, data, sizeof(data));
-  if (size < 6 || data[0] != 0x12 || data[1] != eDataSSID) return false;
-  unsigned sl = data[2], pos = 3 + sl;
-  if (!sl || sl > 32 || pos + 2 > (unsigned)size || data[pos] != eDataPSWD) return false;
-  unsigned pl = data[pos + 1];
+  uint8_t data[TCP_RESPONSE_BUFFER_SIZE];
+  int size = tcp_exchange(TCP_WIFI_REQUEST_OP, data, sizeof(data));
+  if (size < (int)TCP_WIFI_MIN_RESPONSE_LEN || data[TCP_WIFI_OPERATION_OFFSET] != TCP_WIFI_RESPONSE_OP || data[TCP_WIFI_SSID_ID_OFFSET] != eDataSSID) return false;
+  unsigned sl = data[TCP_WIFI_SSID_LENGTH_OFFSET], pos = TCP_WIFI_RESPONSE_FIELD_OFFSET + sl;
+  if (!sl || sl > SSID_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES > (unsigned)size || data[pos] != eDataPSWD) return false;
+  unsigned pl = data[pos + TCP_FIELD_LENGTH_OFFSET];
 
   if (pl < PSWD_LEN_MIN || pl > PSWD_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES + pl != (unsigned)size ||
       memchr(data + TCP_WIFI_RESPONSE_FIELD_OFFSET, 0, sl) || memchr(data + pos + TCP_WIFI_FIELD_METADATA_BYTES, 0, pl)){
@@ -164,7 +164,7 @@ void app_main(void) {
     if (!esp_wifi.connected) {
       mqtt_network_stop();
       if (!on_ap && rounds < WIFI_NETWORK_ROUNDS) {
-        ESP_LOGW(TAG, "[NETWORK] ronda %u/4, hasta 5 intentos", rounds + 1);
+        ESP_LOGW(TAG, "[NETWORK] ronda %u/%u, hasta %u intentos", rounds + 1, (unsigned)WIFI_NETWORK_ROUNDS, (unsigned)WIFI_TOTAL_CONNECT_ATTEMPTS);
         ++rounds;
         wifi_connect_saved();
         if (wifi_wait()){
@@ -182,11 +182,11 @@ void app_main(void) {
       }
       if (wifi_set_credentials(SSID_RPI, PSWD_RPI) == ESP_OK && wifi_wait()) {
         on_ap = true; last_probe = 0; last_mqtt = 0;
-        ESP_LOGI(TAG, "[NETWORK] LOCAL_AP_READY; broker %s:1883", RPI_IP_SETUP);
+        ESP_LOGI(TAG, "[NETWORK] LOCAL_AP_READY; broker %s:%u", RPI_IP_SETUP, (unsigned)MQTT_DEFAULT_PORT);
       } else {
         /* If gateway is absent, occasionally try saved router again. */
         on_ap = false; rounds = 0;
-        ESP_LOGW(TAG, "[NETWORK] AP_UNREACHABLE; nuevo ciclo en 60s");
+        ESP_LOGW(TAG, "[NETWORK] AP_UNREACHABLE; nuevo ciclo en %u ms", (unsigned)WIFI_RECOVER_MS);
         vTaskDelay(pdMS_TO_TICKS(WIFI_RECOVER_MS));
       }
       continue;
@@ -199,7 +199,7 @@ void app_main(void) {
       if (on_ap) snprintf(ip, sizeof(ip), "%s", RPI_IP_SETUP);
       if (on_ap || discover_broker(ip, &port)) {
         mqtt_register_start(ip, port); // can change broker without losing queued events
-      } else ESP_LOGW(TAG, "[MQTT] BROKER_NOT_FOUND; nuevo intento en 60s");
+      } else ESP_LOGW(TAG, "[MQTT] BROKER_NOT_FOUND; nuevo intento en %u ms", (unsigned)WIFI_RECOVER_MS);
     }
     if (on_ap && (!last_probe || now - last_probe >= pdMS_TO_TICKS(TCP_UPDATE_TIMEOUT_MS))) {
       last_probe = now;
@@ -207,10 +207,10 @@ void app_main(void) {
       uint8_t state[TCP_STATUS_BUFFER_SIZE];
       int n = tcp_exchange(TCP_STATUS_REQUEST_OP, state, sizeof(state));
 
-      if (n == TCP_STATUS_RESPONSE_LEN && state[0] == TCP_STATUS_RESPONSE_OP && state[1] == TCP_STATUS_RESPONSE_VERSION) {
+      if (n == TCP_STATUS_RESPONSE_LEN && state[TCP_STATUS_OPERATION_OFFSET] == TCP_STATUS_RESPONSE_OP && state[TCP_STATUS_VERSION_OFFSET] == TCP_STATUS_RESPONSE_VERSION) {
         ESP_LOGI(TAG, "[TCP] wifi=%u backend=%u mqtt=%u storage=%u action=%u",
-                 state[2], state[3], state[4], state[5], state[6]);
-        if (state[6] == TCP_STATUS_WIFI_UPDATE_ACTION) {
+                 state[TCP_STATUS_WIFI_OFFSET], state[TCP_STATUS_BACKEND_OFFSET], state[TCP_STATUS_MQTT_OFFSET], state[TCP_STATUS_STORAGE_OFFSET], state[TCP_STATUS_ACTION_OFFSET]);
+        if (state[TCP_STATUS_ACTION_OFFSET] == TCP_STATUS_WIFI_UPDATE_ACTION) {
           char ssid[SSID_LEN_MAX + TEXT_TERMINATOR_SIZE], password[PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE];
           if (fetch_wifi(ssid, password)) {
             mqtt_network_stop();
@@ -342,7 +342,7 @@ esp_err_t load_cred(uint8_t identifier) {
     uint64_t saved_sum = 0;
 
     ret = nvs_get_str(h, KEY_WIFI_SSID, NULL, &len_s);
-    if (ret == ESP_OK && (len_s < 2 || len_s > SSID_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
+    if (ret == ESP_OK && (len_s < SSID_NVS_MIN_SIZE || len_s > SSID_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       ssid = malloc(len_s);
       if (!ssid)

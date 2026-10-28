@@ -35,8 +35,6 @@ static int s_reply_sub_id = -1;
 static volatile bool s_mqtt_connected = false;
 static TaskHandle_t s_retry_task = NULL;
 
-#define PENDING_COUNT 16
-#define EVENT_BYTES 384
 static SemaphoreHandle_t s_client_lock, s_pending_lock;
 static bool s_running;
 static char s_uri[MQTT_URI_SIZE];
@@ -44,10 +42,9 @@ static char s_ack_topic[MQTT_ACK_TOPIC_SIZE];
 static uint32_t s_boot[MQTT_BOOT_WORDS], s_sequence;
 static struct {
   char id[MQTT_EVENT_ID_SIZE];
-  char payload[EVENT_BYTES];
-} s_pending[PENDING_COUNT];
+  char payload[MQTT_EVENT_BYTES];
+} s_pending[MQTT_PENDING_COUNT];
 
-// estos valores, del cslo el if de donde se los saca?, 36 es un valor constante o pudiera cambiar, si este puede cambiar mejor usar macros o varibales. si no usar staticos entonces 
 static bool uuid_valid(const char *v) {
   if (strlen(v) != UUID_TEXT_LEN)
     return false;
@@ -82,8 +79,6 @@ static void load_node_identity(void) {
   if (nvs_open(IDENTITY_NS, NVS_READONLY, &h) != ESP_OK){
     return;
   }
-  // no usar magic number, usar siempre macros, estos magic numbers no me dicen mucho usar macros o constantes si me dicen mas, describen a lo que representan los arreglos. 
-  //creo que este es el numero por defecto de una direccion mac 18 digitos, pero mejo usar alguna macro que lo identificuqe. 
 
   char mac[MAC_TEXT_SIZE] = {0};
   size_t ml = sizeof(mac), el = sizeof(s_esp_id), bl = sizeof(s_branch_id);
@@ -108,7 +103,7 @@ static void send_registration(void) {
   if (len < 0 || len >= (int)sizeof(payload))
     return;
   int id =
-      esp_mqtt_client_publish(s_client, MQTT_SETUP_TOPIC, payload, len, 1, 0);
+      esp_mqtt_client_publish(s_client, MQTT_SETUP_TOPIC, payload, len, MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_DISABLED);
   ESP_LOGI(TAG, "Solicitud MQTT: %s MAC=%s (msg_id=%d)", MQTT_SETUP_TOPIC,
            s_mac, id);
 }
@@ -119,13 +114,13 @@ static void send_status_and_subscribe(void) {
 
   snprintf(s_ack_topic, sizeof(s_ack_topic), "selfiq/%s/%s/%s/ack", s_branch_id,
            s_esp_id, NODE_MODULE);
-  esp_mqtt_client_subscribe(s_client, s_ack_topic, 1);
+  esp_mqtt_client_subscribe(s_client, s_ack_topic, MQTT_QOS_AT_LEAST_ONCE);
   snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/status", s_branch_id,
            s_esp_id, NODE_MODULE);
-  esp_mqtt_client_publish(s_client, topic, "online", 6, 1, 0);
+  esp_mqtt_client_publish(s_client, topic, MQTT_STATUS_ONLINE, MQTT_STATUS_ONLINE_LEN, MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_DISABLED);
   snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/command", s_branch_id,
            s_esp_id, NODE_MODULE);
-  esp_mqtt_client_subscribe(s_client, topic, 1);
+  esp_mqtt_client_subscribe(s_client, topic, MQTT_QOS_AT_LEAST_ONCE);
   ESP_LOGI(TAG, "ESP32 registrada: MAC=%s ID=%s SUCURSAL=%s", s_mac, s_esp_id,
            s_branch_id);
 }
@@ -140,7 +135,7 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
     if (s_registered)
       send_status_and_subscribe();
     s_reply_ready = false;
-    s_reply_sub_id = esp_mqtt_client_subscribe(s_client, s_reply_topic, 1);
+    s_reply_sub_id = esp_mqtt_client_subscribe(s_client, s_reply_topic, MQTT_QOS_AT_LEAST_ONCE);
     ESP_LOGI(TAG,
              "MQTT conectado; esperando suscripcion de respuesta (msg_id=%d)",
              s_reply_sub_id);
@@ -164,7 +159,7 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
       if (event->current_data_offset == 0 &&
           event->data_len == event->total_data_len) {
         xSemaphoreTake(s_pending_lock, portMAX_DELAY);
-        for (int i = 0; i < PENDING_COUNT; ++i) {
+        for (int i = 0; i < MQTT_PENDING_COUNT; ++i) {
           if (s_pending[i].id[0] &&
               (int)strlen(s_pending[i].id) == event->data_len &&
               !memcmp(s_pending[i].id, event->data, event->data_len)) {
@@ -180,7 +175,6 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
     if (event->topic_len == (int)strlen(s_reply_topic) &&
         memcmp(event->topic, s_reply_topic, event->topic_len) == 0) {
       /* 17 caracteres MAC + | + 36 UUID + | + 36 UUID = 91 bytes. */
-      // lo mismo no usar numeros directo, usar constantes , cabros o variables. 
 
       if (event->current_data_offset != 0 || event->total_data_len != MQTT_REGISTRATION_PAYLOAD_LEN ||
           event->data_len != MQTT_REGISTRATION_PAYLOAD_LEN) {
@@ -188,11 +182,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
                  "Respuesta de registro fragmentada o de tamaño incorrecto");
         break;
       }
-      //todos estos que tiene magic number igual, y especificia porque, que represetan cada numero 
       char response[MQTT_REGISTRATION_BUFFER_SIZE];
       memcpy(response, event->data, MQTT_REGISTRATION_PAYLOAD_LEN);
       response[MQTT_REGISTRATION_PAYLOAD_LEN] = '\0';
-      if (response[MQTT_REGISTRATION_FIRST_SEPARATOR] != '|' || response[MQTT_REGISTRATION_SECOND_SEPARATOR] != '|' ||
+      if (response[MQTT_REGISTRATION_FIRST_SEPARATOR] != MQTT_UUID_SEPARATOR || response[MQTT_REGISTRATION_SECOND_SEPARATOR] != MQTT_UUID_SEPARATOR ||
           strncmp(response, s_mac, MAC_TEXT_LEN) != 0)
         break;
       char esp_id[UUID_TEXT_SIZE], branch_id[UUID_TEXT_SIZE];
@@ -245,7 +238,7 @@ esp_err_t mqtt_queue_value(const char *event_type, double value) {
   xSemaphoreTake(s_pending_lock, portMAX_DELAY);
 
   int slot = -1;
-  for (int i = 0; i < PENDING_COUNT; ++i) {
+  for (int i = 0; i < MQTT_PENDING_COUNT; ++i) {
     if (!s_pending[i].id[0]) {
       slot = i;
       break;
@@ -300,7 +293,7 @@ esp_err_t mqtt_queue_value(const char *event_type, double value) {
 }
 
 static void registration_retry(void *param) {
-  char payload[EVENT_BYTES], topic[MQTT_ACK_TOPIC_SIZE];
+  char payload[MQTT_EVENT_BYTES], topic[MQTT_ACK_TOPIC_SIZE];
   while (1) {
     vTaskDelay(pdMS_TO_TICKS(MQTT_RETRY_INTERVAL_MS));
     xSemaphoreTake(s_client_lock, portMAX_DELAY);
@@ -308,20 +301,20 @@ static void registration_retry(void *param) {
       if (!s_registered) {
         if (!s_reply_ready)
           s_reply_sub_id =
-              esp_mqtt_client_subscribe(s_client, s_reply_topic, 1);
+              esp_mqtt_client_subscribe(s_client, s_reply_topic, MQTT_QOS_AT_LEAST_ONCE);
         else
           send_registration();
       } else {
         snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/telemetry", s_branch_id,
                  s_esp_id, NODE_MODULE);
-        for (int i = 0; i < PENDING_COUNT; ++i) {
+        for (int i = 0; i < MQTT_PENDING_COUNT; ++i) {
           xSemaphoreTake(s_pending_lock, portMAX_DELAY);
           bool used = s_pending[i].id[0] != 0;
           if (used)
             memcpy(payload, s_pending[i].payload, sizeof(payload));
           xSemaphoreGive(s_pending_lock);
           if (used)
-            esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
+            esp_mqtt_client_publish(s_client, topic, payload, MQTT_TEXT_AUTO_LENGTH, MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_DISABLED);
         }
       }
     }

@@ -20,6 +20,8 @@
 #define HEADER 0xABCD
 #define ACK 0x5433
 #define MAX_DATA 100 // el tamanio maximo que aceptara el protocolo en data.
+#define SSID_LEN_MIN 1U
+#define SSID_NVS_MIN_SIZE (SSID_LEN_MIN + TEXT_TERMINATOR_SIZE)
 #define SSID_LEN_MAX 32
 #define PSWD_LEN_MAX 63
 #define PSWD_LEN_MIN 8

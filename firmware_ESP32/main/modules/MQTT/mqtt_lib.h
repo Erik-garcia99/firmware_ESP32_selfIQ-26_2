@@ -4,6 +4,16 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
+#include "global.h"
+
+#define MQTT_PENDING_COUNT 16
+#define MQTT_EVENT_BYTES 384
+#define MQTT_QOS_AT_LEAST_ONCE 1
+#define MQTT_RETAIN_DISABLED 0
+#define MQTT_TEXT_AUTO_LENGTH 0
+#define MQTT_STATUS_ONLINE "online"
+#define MQTT_STATUS_ONLINE_LEN (sizeof(MQTT_STATUS_ONLINE) - TEXT_TERMINATOR_SIZE)
+#define MQTT_HEX_CHARS_PER_BYTE 2U
 #define MAX_TOPIC_LEN 180
 
 #define MDNS_QUERY_TIMEOUT_MS 2000U
@@ -15,11 +25,11 @@
 
 
 #define NODE_TYPE "access_counter" // Tipo del nodo en el backend
-#define NODE_MODULE "capacity_atmosphere" // Firmware actual: shelf guide
+#define NODE_MODULE "capacity_atmosphere" // Valor heredado; validar cambio junto con backend
 #define MQTT_SETUP_TOPIC "selfiq/esp32_setup"
 #define IDENTITY_NS "selfiq_node"
 
-#define MQTT_CLIENT_ID_SIZE (sizeof("esp-") - 1U + MAC_BINARY_SIZE * 2U + TEXT_TERMINATOR_SIZE)
+#define MQTT_CLIENT_ID_SIZE (sizeof("esp-") - 1U + MAC_BINARY_SIZE * MQTT_HEX_CHARS_PER_BYTE + TEXT_TERMINATOR_SIZE)
 #define MQTT_REPLY_TOPIC_SIZE 96U
 #define MQTT_URI_SIZE 64U
 #define MQTT_ACK_TOPIC_SIZE 180U

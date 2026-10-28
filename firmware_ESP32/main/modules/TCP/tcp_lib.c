@@ -20,6 +20,7 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include <errno.h>
+#include <fcntl.h>
 // logs
 #include "esp_err.h"
 #include "esp_log.h"
@@ -131,10 +132,10 @@ void recv_task(void *params) {
     if (!recv_exact(sock, hdr, sizeof(hdr)))
       break;
 
-    uint16_t head = ((uint16_t)hdr[0] << TCP_HEADER_SHIFT) | hdr[1];
-    uint8_t frame_len = hdr[2];
-    uint8_t type = (hdr[3] >> TCP_ACTION_BITS) & TCP_NIBBLE_MASK;
-    uint8_t action = hdr[3] & TCP_NIBBLE_MASK;
+    uint16_t head = ((uint16_t)hdr[TCP_HEADER_HIGH_OFFSET] << TCP_HEADER_SHIFT) | hdr[TCP_HEADER_LOW_OFFSET];
+    uint8_t frame_len = hdr[TCP_LENGTH_OFFSET];
+    uint8_t type = (hdr[TCP_OPERATION_OFFSET] >> TCP_ACTION_BITS) & TCP_NIBBLE_MASK;
+    uint8_t action = hdr[TCP_OPERATION_OFFSET] & TCP_NIBBLE_MASK;
     bool is_nack = (head == ACK && frame_len == TCP_NACK_MARKER &&
                     type == TCP_NIBBLE_MASK && action == TCP_NIBBLE_MASK);
 
@@ -168,7 +169,7 @@ void recv_task(void *params) {
 
     ESP_LOGI(TAG, "RX frame: header=%04X len=%u type=%u action=%u",
              head, frame_len, type, action);
-    if (xQueueSend(tcp_rx_queue, &frame, pdMS_TO_TICKS(100)) != pdTRUE) {
+    if (xQueueSend(tcp_rx_queue, &frame, pdMS_TO_TICKS(TCP_RX_QUEUE_WAIT_MS)) != pdTRUE) {
       ESP_LOGW(TAG, "cola RX llena");
       vPortFree(frame);
       break;
@@ -199,11 +200,11 @@ esp_err_t send_message(void) {
   if (send_info.op_type == OP_NACK) {
     /* NACK: wire = 54 33 FF FF 00 (LEN=0xFF, type=0xF, action=0xF, 1 byte pad)
      */
-    buffer[0] = TCP_ACK_HIGH;
-    buffer[1] = TCP_ACK_LOW;
-    buffer[2] = TCP_NACK_MARKER;
-    buffer[3] = TCP_NACK_MARKER;
-    buffer[4] = 0x00;
+    buffer[TCP_HEADER_HIGH_OFFSET] = TCP_ACK_HIGH;
+    buffer[TCP_HEADER_LOW_OFFSET] = TCP_ACK_LOW;
+    buffer[TCP_LENGTH_OFFSET] = TCP_NACK_MARKER;
+    buffer[TCP_OPERATION_OFFSET] = TCP_NACK_MARKER;
+    buffer[TCP_DATA_OFFSET] = TCP_NACK_PADDING_VALUE;
     offset = TCP_NACK_FRAME_BYTES;
   } else {
     /* HEADER big-endian */
@@ -279,7 +280,6 @@ int tcp_exchange(uint8_t operation, uint8_t *out, size_t cap) {
   struct timeval timeout = {.tv_sec = TCP_SOCKET_TIMEOUT_SEC};
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
   setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-  //el 1 de dnde lo saca?, porue no usar como lo tenia antes, con memset y esas ondas, 
 
   const uint8_t request[] = {TCP_HEADER_HIGH, TCP_HEADER_LOW, TCP_REQUEST_PAYLOAD_LEN, operation};
   
@@ -294,15 +294,14 @@ int tcp_exchange(uint8_t operation, uint8_t *out, size_t cap) {
     if (n <= 0) goto fail;
     got += n;
   }
-  //los valores de los arreglos de donde los saca?
-  if (prefix[0] != TCP_ACK_HIGH || prefix[1] != TCP_ACK_LOW || prefix[2] == 0 || prefix[2] > cap) goto fail;
-  for (size_t got = 0; got < prefix[2];) {
-    int n = recv(sock, out + got, prefix[2] - got, 0);
+  if (prefix[TCP_HEADER_HIGH_OFFSET] != TCP_ACK_HIGH || prefix[TCP_HEADER_LOW_OFFSET] != TCP_ACK_LOW || prefix[TCP_LENGTH_OFFSET] == 0 || prefix[TCP_LENGTH_OFFSET] > cap) goto fail;
+  for (size_t got = 0; got < prefix[TCP_LENGTH_OFFSET];) {
+    int n = recv(sock, out + got, prefix[TCP_LENGTH_OFFSET] - got, 0);
     if (n <= 0) goto fail;
     got += n;
   }
   close(sock);
-  return prefix[2];
+  return prefix[TCP_LENGTH_OFFSET];
 fail:
   close(sock);
   return -1;

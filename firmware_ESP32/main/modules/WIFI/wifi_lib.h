@@ -21,6 +21,8 @@
 // minutos antes de volver a petdir de nuevo las credenciales.
 #define ESP_MAX_RETRY 4 // 1 intento inicial + 4 reintentos = 5
 
+#define WIFI_TOTAL_CONNECT_ATTEMPTS (ESP_MAX_RETRY + 1U)
+#define WIFI_DISCONNECT_TIMEOUT_MS 3000U
 // bits
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
@@ -74,6 +76,6 @@ extern TYPE_ESP_WIFI_T esp_wifi;
 void wifi_init_sta(void);      // init del stack, una sola vez
 void wifi_connect_saved(void); // intenta conectar con lo guardado en flash
 esp_err_t wifi_set_credentials(const char *ssid,
-                               const char *pswd); // guarda en flash y conecta
+                               const char *pswd); // configura en RAM y conecta; main persiste tras conexion exitosa
 
 #endif

@@ -13,6 +13,26 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+#include <stddef.h>
+#include <stdint.h>
+#include "esp_err.h"
+#include "freertos/event_groups.h"
+#include "global.h"
+
+/* Indices en la trama completa: HEADER[2], LEN, TYPE/ACTION, DATA. */
+enum { TCP_HEADER_HIGH_OFFSET, TCP_HEADER_LOW_OFFSET, TCP_LENGTH_OFFSET,
+       TCP_OPERATION_OFFSET, TCP_DATA_OFFSET };
+/* tcp_exchange devuelve desde TYPE/ACTION; no incluye HEADER ni LEN. */
+enum { TCP_WIFI_OPERATION_OFFSET, TCP_WIFI_SSID_ID_OFFSET,
+       TCP_WIFI_SSID_LENGTH_OFFSET };
+enum { TCP_STATUS_OPERATION_OFFSET, TCP_STATUS_VERSION_OFFSET,
+       TCP_STATUS_WIFI_OFFSET, TCP_STATUS_BACKEND_OFFSET, TCP_STATUS_MQTT_OFFSET,
+       TCP_STATUS_STORAGE_OFFSET, TCP_STATUS_ACTION_OFFSET };
+#define TCP_FIELD_LENGTH_OFFSET 1U
+#define TCP_RX_QUEUE_WAIT_MS 100U
+#define TCP_BYTE_MASK 0xFFU
+#define TCP_NACK_PADDING_VALUE 0U
+
 //+++++++++++++++++++++ macros
 
 #define RPI_IP_SETUP "192.168.50.1"
@@ -35,10 +55,10 @@
 #define TCP_FRAME_OVERHEAD (TCP_PREFIX_BYTES + TCP_OPERATION_BYTES)
 #define TCP_REQUEST_PAYLOAD_LEN TCP_OPERATION_BYTES
 //para sacar el header del frame si es ACK - NACK o HEADER de peticion de RPI->ESP32
-#define TCP_HEADER_HIGH ((HEADER >> 8) & 0xFFU)
-#define TCP_HEADER_LOW (HEADER & 0xFFU)
-#define TCP_ACK_HIGH ((ACK >> 8) & 0xFFU)
-#define TCP_ACK_LOW (ACK & 0xFFU)
+#define TCP_HEADER_HIGH ((HEADER >> TCP_HEADER_SHIFT) & TCP_BYTE_MASK)
+#define TCP_HEADER_LOW (HEADER & TCP_BYTE_MASK)
+#define TCP_ACK_HIGH ((ACK >> TCP_HEADER_SHIFT) & TCP_BYTE_MASK)
+#define TCP_ACK_LOW (ACK & TCP_BYTE_MASK)
 
 // WIFI + eReqWifi = 0x11 -> socilicitar las credencales WIFI 
 #define TCP_WIFI_REQUEST_OP 0x11U

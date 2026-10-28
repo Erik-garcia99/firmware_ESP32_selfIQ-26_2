@@ -35,7 +35,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     if (s_switching || event->reason == WIFI_REASON_ASSOC_LEAVE) return;
     if (s_retry_num < ESP_MAX_RETRY) {
       ++s_retry_num;
-      ESP_LOGW(TAG, "[NETWORK] intento %d/5 reason=%d", s_retry_num + 1, event->reason);
+      ESP_LOGW(TAG, "[NETWORK] intento %d/%u reason=%d", s_retry_num + 1, (unsigned)WIFI_TOTAL_CONNECT_ATTEMPTS, event->reason);
       if (esp_wifi_connect() == ESP_OK) return;
     }
     xEventGroupSetBits(g_wifi_event_group, WIFI_FAIL_BIT);
@@ -84,7 +84,7 @@ esp_err_t wifi_set_credentials(const char *ssid, const char *password) {
   xEventGroupClearBits(g_wifi_event_group, WIFI_STOPPED_BIT);
   
   if (esp_wifi_disconnect() == ESP_OK){
-    xEventGroupWaitBits(g_wifi_event_group, WIFI_STOPPED_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(3000));
+    xEventGroupWaitBits(g_wifi_event_group, WIFI_STOPPED_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(WIFI_DISCONNECT_TIMEOUT_MS));
   }
   
   esp_wifi.connected = 0;
