@@ -14,12 +14,14 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
+#include "esp_http_client.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 
 #include<global.h>
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/WIFI/wifi_lib.h"
+#include "modules/camera/camera_lib.h"
 
 
 static const char *TAG = "selfiq_mqtt";
@@ -282,6 +284,139 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
       }
       s_registered = true;
       send_status_and_subscribe();
+    } else if (event->topic_len > 0 && s_registered &&
+               event->topic_len >= 8 &&
+               !memcmp(event->topic + event->topic_len - 8, "/command", 8)) {
+      /* Rama JSON para comandos en .../shelf_cam/command. */
+      if (event->current_data_offset != 0 ||
+          event->data_len != event->total_data_len ||
+          event->data_len <= 0 || event->data_len >= EVENT_BYTES) {
+        ESP_LOGW(TAG, "Comando fragmentado o demasiado grande; ignorado");
+        break;
+      }
+      /* Copiar payload a buffer local con terminador. */
+      char cmd_buf[EVENT_BYTES];
+      memcpy(cmd_buf, event->data, event->data_len);
+      cmd_buf[event->data_len] = '\0';
+
+      /* Extraer "type" del JSON de forma simple (sin cJSON). */
+      char cmd_type[33] = {0};
+      const char *t = strstr(cmd_buf, "\"type\"");
+      if (t) {
+        t = strchr(t, ':');
+        if (t) {
+          t++;
+          while (*t == ' ' || *t == '"') t++;
+          int i = 0;
+          while (*t && *t != '"' && *t != ',' && *t != '}' && i < 32) {
+            cmd_type[i++] = *t++;
+          }
+          cmd_type[i] = '\0';
+        }
+      }
+
+      ESP_LOGI(TAG, "Comando recibido: type=%s", cmd_type);
+
+      if (!strcmp(cmd_type, "snapshot.request")) {
+        /* Extraer req_id. */
+        char req_id[65] = {0};
+        const char *r = strstr(cmd_buf, "\"req_id\"");
+        if (r) {
+          r = strchr(r, ':');
+          if (r) {
+            r++;
+            while (*r == ' ' || *r == '"') r++;
+            int i = 0;
+            while (*r && *r != '"' && *r != ',' && *r != '}' && i < 64) {
+              req_id[i++] = *r++;
+            }
+            req_id[i] = '\0';
+          }
+        }
+        if (!req_id[0]) {
+          strcpy(req_id, "no-req-id");
+        }
+
+        ESP_LOGI(TAG, "snapshot.request req_id=%s; capturando...", req_id);
+
+        camera_fb_t *frame = camera_capture();
+        if (!frame || !frame->buf || frame->len == 0 ||
+            frame->format != PIXFORMAT_GRAYSCALE) {
+          ESP_LOGE(TAG, "snapshot: captura invalida");
+          if (frame) camera_release(frame);
+          break;
+        }
+
+        uint8_t *jpg_buf = NULL;
+        size_t jpg_len = 0;
+        bool ok = frame2jpg(frame, 12, &jpg_buf, &jpg_len);
+        size_t w = frame->width, h = frame->height;
+        camera_release(frame);
+
+        if (!ok || !jpg_buf || jpg_len == 0) {
+          ESP_LOGE(TAG, "snapshot: frame2jpg fallo");
+          if (jpg_buf) free(jpg_buf);
+          break;
+        }
+
+        ESP_LOGI(TAG, "snapshot: JPEG %ux%u, %u bytes; enviando al gateway",
+                 (unsigned)w, (unsigned)h, (unsigned)jpg_len);
+
+        /* Obtener IP del gateway desde s_uri (mqtt://IP:port). */
+        char gw_ip[IPV4_TEXT_SIZE] = {0};
+        const char *uri = s_uri;
+        if (uri && !strncmp(uri, "mqtt://", 7)) {
+          const char *ip_start = uri + 7;
+          const char *ip_end = strchr(ip_start, ':');
+          if (!ip_end) ip_end = ip_start + strlen(ip_start);
+          size_t ip_len = ip_end - ip_start;
+          if (ip_len > 0 && ip_len < IPV4_TEXT_SIZE) {
+            memcpy(gw_ip, ip_start, ip_len);
+            gw_ip[ip_len] = '\0';
+          }
+        }
+        if (!gw_ip[0]) {
+          ESP_LOGE(TAG, "snapshot: no se pudo obtener IP del gateway");
+          free(jpg_buf);
+          break;
+        }
+
+        char url[128];
+        snprintf(url, sizeof(url), "http://%s:80/camera/snapshot", gw_ip);
+
+        esp_http_client_config_t http_cfg = {
+          .url = url,
+          .method = HTTP_METHOD_POST,
+          .timeout_ms = 10000,
+        };
+        esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+        if (!client) {
+          ESP_LOGE(TAG, "snapshot: no se pudo crear cliente HTTP");
+          free(jpg_buf);
+          break;
+        }
+
+        esp_http_client_set_header(client, "Content-Type", "image/jpeg");
+        esp_http_client_set_header(client, "X-Req-Id", req_id);
+        esp_http_client_set_header(client, "X-Node-Id", s_esp_id);
+        esp_http_client_set_header(client, "X-Branch-Id", s_branch_id);
+
+        esp_http_client_set_post_field(client, (const char *)jpg_buf, (int)jpg_len);
+
+        esp_err_t http_err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+        free(jpg_buf);
+
+        if (http_err == ESP_OK && status >= 200 && status < 300) {
+          ESP_LOGI(TAG, "snapshot: enviado OK (HTTP %d)", status);
+        } else {
+          ESP_LOGE(TAG, "snapshot: fallo HTTP err=%s status=%d",
+                   esp_err_to_name(http_err), status);
+        }
+      } else {
+        ESP_LOGI(TAG, "Comando no implementado aun: %s", cmd_type);
+      }
     } else if (event->topic_len > 0) {
       ESP_LOGI(TAG,
                "Mensaje en tópico del sistema (comando; ejecución pendiente)");
@@ -362,6 +497,79 @@ esp_err_t mqtt_queue_value(const char *event_type, double value) {
   }
 
   // Marcar el espacio como ocupado solo cuando el mensaje está completo.
+  strcpy(s_pending[slot].id, event_id);
+
+  xSemaphoreGive(s_pending_lock);
+  return ESP_OK;
+}
+
+esp_err_t mqtt_queue_json(const char *event_type, const char *data_json) {
+  if (!event_type || !*event_type || strlen(event_type) > MQTT_EVENT_TYPE_MAX_LEN ||
+      !data_json || !*data_json)
+    return ESP_ERR_INVALID_ARG;
+
+  for (const char *p = event_type; *p; ++p) {
+    if (!(*p >= 'a' && *p <= 'z') &&
+        !(*p >= '0' && *p <= '9') && *p != '_')
+      return ESP_ERR_INVALID_ARG;
+  }
+
+  size_t dj_len = strlen(data_json);
+  if (data_json[0] != '{' || data_json[dj_len - 1] != '}')
+    return ESP_ERR_INVALID_ARG;
+
+  if (!s_pending_lock || !s_registered)
+    return ESP_ERR_INVALID_STATE;
+
+  xSemaphoreTake(s_pending_lock, portMAX_DELAY);
+
+  int slot = -1;
+  for (int i = 0; i < PENDING_COUNT; ++i) {
+    if (!s_pending[i].id[0]) {
+      slot = i;
+      break;
+    }
+  }
+
+  if (slot < 0) {
+    xSemaphoreGive(s_pending_lock);
+    ESP_LOGE(TAG, "[STORAGE] RAM_QUEUE_FULL; muestra no aceptada");
+    return ESP_ERR_NO_MEM;
+  }
+
+  ++s_sequence;
+
+  char event_id[sizeof(s_pending[slot].id)];
+  int written = snprintf(
+      event_id, sizeof(event_id),
+      "%s-%08lx%08lx-%08lx",
+      s_client_id,
+      (unsigned long)s_boot[0],
+      (unsigned long)s_boot[1],
+      (unsigned long)s_sequence);
+
+  if (written < 0 || (size_t)written >= sizeof(event_id)) {
+    xSemaphoreGive(s_pending_lock);
+    return ESP_ERR_INVALID_SIZE;
+  }
+
+  written = snprintf(
+      s_pending[slot].payload,
+      sizeof(s_pending[slot].payload),
+      "{\"event_id\":\"%s\",\"event_type\":\"%s\",\"uptime_ms\":%llu,"
+      "\"data\":%s}",
+      event_id,
+      event_type,
+      (unsigned long long)xTaskGetTickCount() * portTICK_PERIOD_MS,
+      data_json);
+
+  if (written < 0 ||
+      (size_t)written >= sizeof(s_pending[slot].payload)) {
+    xSemaphoreGive(s_pending_lock);
+    ESP_LOGE(TAG, "[STORAGE] payload demasiado grande para cola RAM");
+    return ESP_ERR_INVALID_SIZE;
+  }
+
   strcpy(s_pending[slot].id, event_id);
 
   xSemaphoreGive(s_pending_lock);
