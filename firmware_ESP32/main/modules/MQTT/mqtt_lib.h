@@ -24,8 +24,8 @@
 #define MAC_TEXT_SIZE (MAC_TEXT_LEN + TEXT_TERMINATOR_SIZE)
 
 
-#define NODE_TYPE "access_counter" // Tipo del nodo en el backend
-#define NODE_MODULE "capacity_atmosphere" // Firmware actual: access counter
+#define NODE_TYPE "shelf_cam" // Tipo del nodo en el backend (camara de repisa)
+#define NODE_MODULE "shelf_cam" // Modulo del nodo: camara de repisa
 #define MQTT_SETUP_TOPIC "selfiq/esp32_setup"
 #define IDENTITY_NS "selfiq_node"
 
@@ -60,4 +60,9 @@ bool mqtt_network_connected(void);
  * Used by each sensor module, e.g. mqtt_queue_value("temperature", 23.5).
  * No UTC clock is invented: gateway attaches received_at. */
 esp_err_t mqtt_queue_value(const char *event_type, double value);
+/* Igual que mqtt_queue_value pero con un objeto `data` arbitrario (JSON).
+ * data_json debe ser un objeto JSON valido, p. ej. "{\"roi_id\":\"...\",\"conf\":0.9}".
+ * Se almacena tal cual dentro de "data". Maximo EVENT_BYTES-1 caracteres en total.
+ * Usado por modulos que publican mas de un campo (ej. roi_occ). */
+esp_err_t mqtt_queue_json(const char *event_type, const char *data_json);
 #endif

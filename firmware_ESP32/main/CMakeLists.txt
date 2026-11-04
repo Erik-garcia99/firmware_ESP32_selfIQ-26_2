@@ -21,4 +21,5 @@ idf_component_register(
         nvs_flash
         lwip
         espressif__mqtt
+        esp_http_client
 )

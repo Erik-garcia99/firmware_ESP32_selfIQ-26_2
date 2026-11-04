@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "modules/MQTT/mqtt_lib.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_timer.h"
@@ -55,12 +56,12 @@ esp_err_t camera_init(void)
         .xclk_freq_hz = CAMERA_XCLK_HZ,
         .ledc_timer = LEDC_TIMER_0,
         .ledc_channel = LEDC_CHANNEL_0,
-        .pixel_format = PIXFORMAT_JPEG,
+        .pixel_format = PIXFORMAT_GRAYSCALE,
         .frame_size = CAMERA_INITIAL_FRAME_SIZE,
         .jpeg_quality = CAMERA_JPEG_QUALITY,
         .fb_count = CAMERA_FRAME_BUFFER_COUNT,
         .fb_location = psram_available ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM,
-        .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
+        .grab_mode = CAMERA_GRAB_LATEST,
     };
 
     if (!psram_available) {
@@ -122,20 +123,24 @@ esp_err_t camera_deinit(void)
     return ret;
 }
 
-/* Diagnostico inicial: no publica imagenes ni inventa mediciones de ROI.
+/* Captura estable en grises + publicacion de salud del nodo cada 60 s.
  * Siempre devuelve el buffer al driver antes de esperar el proximo ciclo. */
 static void camera_task(void *arg)
 {
     (void)arg;
     uint32_t captured = 0;
     uint32_t failed = 0;
+    uint32_t frames_in_window = 0;
+    TickType_t last_health = xTaskGetTickCount();
+    bool first_capture = true;
+
     for (;;) {
         if (!camera_ready) {
             if (camera_init() != ESP_OK) {
                 vTaskDelay(pdMS_TO_TICKS(CAMERA_INIT_RETRY_MS));
                 continue;
             }
-            ESP_LOGI(TAG, "CAPTURE_STARTED: intervalo=%u ms; sin analisis ROI",
+            ESP_LOGI(TAG, "CAPTURE_STARTED: intervalo=%u ms; grises QVGA, 2 buffers PSRAM",
                      (unsigned)CAMERA_CAPTURE_INTERVAL_MS);
         }
 
@@ -148,24 +153,60 @@ static void camera_task(void *arg)
             size_t height = frame->height;
             size_t bytes = frame->len;
             bool valid = frame->buf != NULL && bytes > 0 &&
-                         frame->format == PIXFORMAT_JPEG;
+                         frame->format == PIXFORMAT_GRAYSCALE;
             camera_release(frame);
             if (valid) {
                 ++captured;
-                if (captured == 1U || captured % CAMERA_LOG_EVERY_FRAMES == 0U) {
+                ++frames_in_window;
+                if (first_capture || captured % CAMERA_LOG_EVERY_FRAMES == 0U) {
                     ESP_LOGI(TAG, "CAPTURE_OK: %ux%u bytes=%u capture_us=%lld ok=%lu fail=%lu heap=%u",
                              (unsigned)width, (unsigned)height, (unsigned)bytes,
                              (long long)elapsed_us, (unsigned long)captured,
                              (unsigned long)failed,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+                    first_capture = false;
                 }
             } else {
                 ++failed;
-                ESP_LOGW(TAG, "CAPTURE_INVALID: buffer vacio o formato no JPEG");
+                ESP_LOGW(TAG, "CAPTURE_INVALID: buffer vacio o formato no gris");
             }
         } else {
             ++failed;
         }
+
+        /* Publicar salud cada 60 s (fijo, no depende del perfil). */
+        TickType_t now = xTaskGetTickCount();
+        if (now - last_health >= pdMS_TO_TICKS(CAMERA_HEALTH_INTERVAL_MS)) {
+            last_health = now;
+            float fps = (float)frames_in_window * 1000.0f / (float)CAMERA_HEALTH_INTERVAL_MS;
+            uint32_t heap = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            uint32_t uptime_s = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000);
+            /* Perfil actual: 0 = normal (Fase 7B lo cambia via cfg.set). */
+            const int profile = 0;
+
+            esp_err_t r;
+            r = mqtt_queue_value("cam_fps", (double)fps);
+            if (r != ESP_OK && r != ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "mqtt_queue_value(cam_fps)=%s", esp_err_to_name(r));
+            r = mqtt_queue_value("cam_heap", (double)heap);
+            if (r != ESP_OK && r != ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "mqtt_queue_value(cam_heap)=%s", esp_err_to_name(r));
+            r = mqtt_queue_value("cam_fails", (double)failed);
+            if (r != ESP_OK && r != ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "mqtt_queue_value(cam_fails)=%s", esp_err_to_name(r));
+            r = mqtt_queue_value("cam_uptime", (double)uptime_s);
+            if (r != ESP_OK && r != ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "mqtt_queue_value(cam_uptime)=%s", esp_err_to_name(r));
+            r = mqtt_queue_value("cam_profile", (double)profile);
+            if (r != ESP_OK && r != ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "mqtt_queue_value(cam_profile)=%s", esp_err_to_name(r));
+
+            ESP_LOGI(TAG, "HEALTH: fps=%.1f heap=%u fails=%lu uptime=%us profile=%d frames_60s=%u",
+                     (double)fps, (unsigned)heap, (unsigned long)failed,
+                     (unsigned long)uptime_s, profile, (unsigned)frames_in_window);
+            frames_in_window = 0;
+        }
+
         /* Si captura tarda demasiado, ceder CPU sin intentar recuperar ciclos. */
         TickType_t elapsed_ticks = xTaskGetTickCount() - cycle_start;
         TickType_t interval = pdMS_TO_TICKS(CAMERA_CAPTURE_INTERVAL_MS);
