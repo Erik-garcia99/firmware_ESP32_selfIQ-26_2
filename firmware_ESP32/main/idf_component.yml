@@ -17,3 +17,6 @@ dependencies:
   espressif/mdns: '*'
   espressif/mqtt: '*'
   espressif/esp32-camera: '*'
+  # Fijado para no arrastrar 1.3.2 al agregar cJSON; el proyecto venia con 1.3.1.
+  espressif/esp_jpeg: '1.3.1'
+  espressif/cjson: '^1.7.19'

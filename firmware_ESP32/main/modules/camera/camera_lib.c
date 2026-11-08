@@ -2,16 +2,28 @@
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "modules/MQTT/mqtt_lib.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "global.h"
 
 static const char *TAG = "SELFIQ_CAMERA";
 static bool camera_ready = false;
 static TaskHandle_t camera_task_handle = NULL;
+static QueueHandle_t s_snapshot_queue = NULL;
+static SemaphoreHandle_t s_target_lock = NULL;
+static char s_gateway_ip[IPV4_TEXT_SIZE];
+static char s_node_id[UUID_TEXT_SIZE];
+static char s_branch_id[UUID_TEXT_SIZE];
 
 /* GPIO del modelo AI-Thinker ESP32-CAM clasico. */
 #define CAM_PIN_PWDN   32
@@ -123,8 +135,99 @@ esp_err_t camera_deinit(void)
     return ret;
 }
 
-/* Captura estable en grises + publicacion de salud del nodo cada 60 s.
- * Siempre devuelve el buffer al driver antes de esperar el proximo ciclo. */
+void camera_set_snapshot_target(const char *gateway_ip, const char *node_id,
+                                const char *branch_id)
+{
+    if (!s_target_lock) return;
+    xSemaphoreTake(s_target_lock, portMAX_DELAY);
+    snprintf(s_gateway_ip, sizeof(s_gateway_ip), "%s", gateway_ip ? gateway_ip : "");
+    snprintf(s_node_id, sizeof(s_node_id), "%s", node_id ? node_id : "");
+    snprintf(s_branch_id, sizeof(s_branch_id), "%s", branch_id ? branch_id : "");
+    xSemaphoreGive(s_target_lock);
+}
+
+esp_err_t camera_request_snapshot(const char *req_id)
+{
+    if (!req_id || !*req_id || strlen(req_id) > CAMERA_REQ_ID_MAX)
+        return ESP_ERR_INVALID_ARG;
+    if (!s_snapshot_queue)
+        return ESP_ERR_INVALID_STATE;
+
+    char item[CAMERA_REQ_ID_SIZE] = {0};
+    snprintf(item, sizeof(item), "%s", req_id);
+    if (xQueueSend(s_snapshot_queue, item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "snapshot: cola llena; solicitud descartada");
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+/* Solo la llama la tarea de camara, con el frame todavia valido. */
+static void camera_send_snapshot(camera_fb_t *frame, const char *req_id)
+{
+    char gateway[IPV4_TEXT_SIZE] = {0};
+    char node[UUID_TEXT_SIZE] = {0};
+    char branch[UUID_TEXT_SIZE] = {0};
+    if (s_target_lock) {
+        xSemaphoreTake(s_target_lock, portMAX_DELAY);
+        memcpy(gateway, s_gateway_ip, sizeof(gateway));
+        memcpy(node, s_node_id, sizeof(node));
+        memcpy(branch, s_branch_id, sizeof(branch));
+        xSemaphoreGive(s_target_lock);
+    }
+    if (!gateway[0] || !node[0] || !branch[0]) {
+        ESP_LOGE(TAG, "snapshot: destino no configurado (gateway/identidad)");
+        return;
+    }
+
+    uint8_t *jpg = NULL;
+    size_t jpg_len = 0;
+    if (!frame2jpg(frame, (uint8_t)CAMERA_JPEG_QUALITY, &jpg, &jpg_len) ||
+        !jpg || jpg_len == 0) {
+        ESP_LOGE(TAG, "snapshot: frame2jpg fallo");
+        free(jpg);
+        return;
+    }
+
+    ESP_LOGI(TAG, "snapshot: JPEG %ux%u, %u bytes; enviando al gateway",
+             (unsigned)frame->width, (unsigned)frame->height, (unsigned)jpg_len);
+
+    char url[128];
+    snprintf(url, sizeof(url), "http://%s:80/camera/snapshot", gateway);
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 10000,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "snapshot: no se pudo crear cliente HTTP");
+        free(jpg);
+        return;
+    }
+
+    esp_http_client_set_header(client, "Content-Type", "image/jpeg");
+    esp_http_client_set_header(client, "X-Req-Id", req_id);
+    esp_http_client_set_header(client, "X-Node-Id", node);
+    esp_http_client_set_header(client, "X-Branch-Id", branch);
+    esp_http_client_set_post_field(client, (const char *)jpg, (int)jpg_len);
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    free(jpg);
+
+    if (err == ESP_OK && status >= 200 && status < 300) {
+        ESP_LOGI(TAG, "snapshot: enviado OK (HTTP %d) req=%s", status, req_id);
+    } else {
+        ESP_LOGE(TAG, "snapshot: fallo HTTP err=%s status=%d req=%s",
+                 esp_err_to_name(err), status, req_id);
+    }
+}
+
+/* Captura estable en grises + salud del nodo cada 60 s + snapshots.
+ * Esta tarea es la unica que llama a camera_capture/frame2jpg. Solicitudes de
+ * snapshot llegan por cola y se atienden en el siguiente frame (<=1 s). */
 static void camera_task(void *arg)
 {
     (void)arg;
@@ -133,6 +236,7 @@ static void camera_task(void *arg)
     uint32_t frames_in_window = 0;
     TickType_t last_health = xTaskGetTickCount();
     bool first_capture = true;
+    char pending[CAMERA_REQ_ID_SIZE] = {0};
 
     for (;;) {
         if (!camera_ready) {
@@ -154,7 +258,6 @@ static void camera_task(void *arg)
             size_t bytes = frame->len;
             bool valid = frame->buf != NULL && bytes > 0 &&
                          frame->format == PIXFORMAT_GRAYSCALE;
-            camera_release(frame);
             if (valid) {
                 ++captured;
                 ++frames_in_window;
@@ -166,12 +269,25 @@ static void camera_task(void *arg)
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
                     first_capture = false;
                 }
+                if (pending[0]) {
+                    camera_send_snapshot(frame, pending);
+                    pending[0] = '\0';
+                }
             } else {
                 ++failed;
                 ESP_LOGW(TAG, "CAPTURE_INVALID: buffer vacio o formato no gris");
+                if (pending[0]) {
+                    ESP_LOGE(TAG, "snapshot: captura invalida; solicitud descartada");
+                    pending[0] = '\0';
+                }
             }
+            camera_release(frame);
         } else {
             ++failed;
+            if (pending[0]) {
+                ESP_LOGE(TAG, "snapshot: captura invalida; solicitud descartada");
+                pending[0] = '\0';
+            }
         }
 
         /* Publicar salud cada 60 s (fijo, no depende del perfil). */
@@ -207,14 +323,17 @@ static void camera_task(void *arg)
             frames_in_window = 0;
         }
 
-        /* Si captura tarda demasiado, ceder CPU sin intentar recuperar ciclos. */
+        /* Esperar el resto del ciclo, despertando si llega un snapshot. */
         TickType_t elapsed_ticks = xTaskGetTickCount() - cycle_start;
         TickType_t interval = pdMS_TO_TICKS(CAMERA_CAPTURE_INTERVAL_MS);
-        if (elapsed_ticks < interval) {
-            vTaskDelay(interval - elapsed_ticks);
-        } else {
+        TickType_t wait = elapsed_ticks < interval ? interval - elapsed_ticks : 0;
+        if (elapsed_ticks >= interval) {
             ESP_LOGW(TAG, "CAPTURE_SLOW: ciclo excede intervalo configurado");
-            vTaskDelay(interval);
+            wait = interval;
+        }
+        char request[CAMERA_REQ_ID_SIZE];
+        if (xQueueReceive(s_snapshot_queue, request, wait) == pdTRUE) {
+            memcpy(pending, request, sizeof(pending));
         }
     }
 }
@@ -222,6 +341,14 @@ static void camera_task(void *arg)
 esp_err_t camera_start_task(void)
 {
     if (camera_task_handle != NULL) return ESP_OK;
+    if (!s_snapshot_queue) {
+        s_snapshot_queue = xQueueCreate(CAMERA_SNAPSHOT_QUEUE_LEN, CAMERA_REQ_ID_SIZE);
+        if (!s_snapshot_queue) return ESP_ERR_NO_MEM;
+    }
+    if (!s_target_lock) {
+        s_target_lock = xSemaphoreCreateMutex();
+        if (!s_target_lock) return ESP_ERR_NO_MEM;
+    }
     if (xTaskCreate(camera_task, "selfiq_camera", CAMERA_TASK_STACK_BYTES,
                     NULL, CAMERA_TASK_PRIORITY, &camera_task_handle) != pdPASS) {
         camera_task_handle = NULL;

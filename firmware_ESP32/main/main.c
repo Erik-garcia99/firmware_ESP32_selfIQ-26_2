@@ -29,6 +29,7 @@
 #include "modules/TCP/tcp_lib.h"
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/camera/camera_lib.h"
+#include "modules/roi/roi_store.h"
 
 /* Globals kept for the existing TCP library; recovery exchanges below have a
  * private socket and never run recv_task concurrently on that socket. */
@@ -150,6 +151,13 @@ void app_main(void) {
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra", esp_err_to_name(err));
     return;
+  }
+  /* ROI se carga antes de MQTT/camara para que un reinicio conserve las zonas. */
+  esp_err_t roi_err = roi_store_init();
+  if (roi_err == ESP_ERR_NVS_NOT_FOUND) {
+    ESP_LOGI(TAG, "[ROI] sin configuracion previa; se espera roi.set");
+  } else if (roi_err != ESP_OK) {
+    ESP_LOGE(TAG, "[ROI] NVS invalida (%s); se arranca sin zonas", esp_err_to_name(roi_err));
   }
   wifi_init_sta();
   /* La captura tiene su propia tarea y no depende de Internet/MQTT. */

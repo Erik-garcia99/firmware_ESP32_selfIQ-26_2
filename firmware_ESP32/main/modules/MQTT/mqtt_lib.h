@@ -52,6 +52,12 @@
 #define MQTT_RECONNECT_TIMEOUT_MS 5000U
 #define MQTT_OUTBOX_BYTES 8192U
 
+/* Comandos JSON: roi.set con 8 ROI ronda 700-1000 B. EVENT_BYTES (384) se
+ * reserva para telemetria; un comando mas grande se descartaria en silencio. */
+#define MQTT_CMD_BYTES 1536U
+#define MQTT_RX_BUFFER_BYTES 2048U
+#define MQTT_TASK_STACK_BYTES 8192U
+
 /* Call start/stop only from the connection owner (main), never MQTT callback. */
 esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port);
 void mqtt_network_stop(void);
@@ -65,4 +71,7 @@ esp_err_t mqtt_queue_value(const char *event_type, double value);
  * Se almacena tal cual dentro de "data". Maximo EVENT_BYTES-1 caracteres en total.
  * Usado por modulos que publican mas de un campo (ej. roi_occ). */
 esp_err_t mqtt_queue_json(const char *event_type, const char *data_json);
+/* Publica un ACK pequeno (roi_ack) en .../command/ack con QoS 1.
+ * No usa la cola del outbox ni la RAM de telemetria. */
+esp_err_t mqtt_publish_ack_json(const char *payload);
 #endif
