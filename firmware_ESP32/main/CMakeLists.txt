@@ -5,6 +5,9 @@ idf_component_register(
         "modules/TCP/tcp_lib.c"
         "modules/MQTT/mqtt_lib.c"
         "modules/camera/camera_lib.c"
+        "modules/roi/roi_core.c"
+        "modules/roi/roi_store.c"
+        "modules/roi/roi_cmd.c"
 
     INCLUDE_DIRS
         "."
@@ -12,6 +15,7 @@ idf_component_register(
         "modules/TCP"
         "modules/MQTT"
         "modules/camera"
+        "modules/roi"
 
     REQUIRES
         mdns

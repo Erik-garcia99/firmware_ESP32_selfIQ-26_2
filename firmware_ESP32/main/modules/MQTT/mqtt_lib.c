@@ -14,7 +14,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
-#include "esp_http_client.h"
+#include "cJSON.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 
@@ -22,6 +22,9 @@
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/WIFI/wifi_lib.h"
 #include "modules/camera/camera_lib.h"
+#include "modules/roi/roi_cmd.h"
+#include "modules/roi/roi_core.h"
+#include "modules/roi/roi_store.h"
 
 
 static const char *TAG = "selfiq_mqtt";
@@ -46,6 +49,8 @@ static SemaphoreHandle_t s_client_lock, s_pending_lock;
 static bool s_running;
 static char s_uri[MQTT_URI_SIZE];
 static char s_ack_topic[MQTT_ACK_TOPIC_SIZE];
+static char s_cmd_topic[MAX_TOPIC_LEN];
+static char s_cmd_ack_topic[MAX_TOPIC_LEN];
 static uint32_t s_boot[MQTT_BOOT_WORDS], s_sequence;
 static struct {
   char id[MQTT_EVENT_ID_SIZE];
@@ -132,6 +137,20 @@ static void send_registration(void) {
            s_mac, id);
 }
 
+static void update_snapshot_target(void) {
+  char gateway[IPV4_TEXT_SIZE] = {0};
+  if (s_uri[0] && !strncmp(s_uri, "mqtt://", 7)) {
+    const char *start = s_uri + 7;
+    const char *end = strchr(start, ':');
+    size_t length = end ? (size_t)(end - start) : strlen(start);
+    if (length > 0 && length < sizeof(gateway)) {
+      memcpy(gateway, start, length);
+      gateway[length] = '\0';
+    }
+  }
+  camera_set_snapshot_target(gateway, s_esp_id, s_branch_id);
+}
+
 static void send_status_and_subscribe(void) {
   //
   char topic[MAX_TOPIC_LEN];
@@ -142,11 +161,14 @@ static void send_status_and_subscribe(void) {
   snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/status", s_branch_id,
            s_esp_id, NODE_MODULE);
   esp_mqtt_client_publish(s_client, topic, "online", 6, 1, 0);
-  snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/command", s_branch_id,
-           s_esp_id, NODE_MODULE);
-  esp_mqtt_client_subscribe(s_client, topic, 1);
+  snprintf(s_cmd_topic, sizeof(s_cmd_topic), "selfiq/%s/%s/%s/command",
+           s_branch_id, s_esp_id, NODE_MODULE);
+  esp_mqtt_client_subscribe(s_client, s_cmd_topic, 1);
+  snprintf(s_cmd_ack_topic, sizeof(s_cmd_ack_topic),
+           "selfiq/%s/%s/%s/command/ack", s_branch_id, s_esp_id, NODE_MODULE);
   snprintf(topic, sizeof(topic), "selfiq/%s/%s/control/command", s_branch_id, s_esp_id);
   esp_mqtt_client_subscribe(s_client, topic, 1);
+  update_snapshot_target();
   ESP_LOGI(TAG, "ESP32 registrada: MAC=%s ID=%s SUCURSAL=%s", s_mac, s_esp_id,
            s_branch_id);
 }
@@ -193,6 +215,60 @@ static void reset_identity(esp_mqtt_event_handle_t event) {
   snprintf(result_topic, sizeof(result_topic), "%.*sresult", (int)strlen(topic) - 7, topic);
   esp_mqtt_client_publish(s_client, result_topic, (const char *)payload, sizeof(payload), 1, 0);
   ESP_LOGI(TAG, "Restablecimiento de identidad: %s; Wi-Fi y firmware conservados", esp_err_to_name(err));
+}
+
+esp_err_t mqtt_publish_ack_json(const char *payload) {
+  if (!payload || !*payload)
+    return ESP_ERR_INVALID_ARG;
+  if (!s_client || !s_mqtt_connected || !s_registered || !s_cmd_ack_topic[0])
+    return ESP_ERR_INVALID_STATE;
+  int id = esp_mqtt_client_publish(s_client, s_cmd_ack_topic, payload, 0, 1, 0);
+  return id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+static void roi_send_ack(const char *req_id, bool ok, uint32_t version,
+                         size_t count, const char *error) {
+  char payload[ROI_ACK_JSON_SIZE];
+  bool built = ok ? roi_cmd_ack_ok(payload, sizeof(payload), req_id, version,
+                                   count)
+                  : roi_cmd_ack_error(payload, sizeof(payload), req_id, error);
+  if (!built) {
+    ESP_LOGE(TAG, "ROI ack no construido: req=%s", req_id);
+    return;
+  }
+  esp_err_t err = mqtt_publish_ack_json(payload);
+  if (err == ESP_OK)
+    ESP_LOGI(TAG, "ROI ack enviado: req=%s ok=%d", req_id, ok ? 1 : 0);
+  else
+    ESP_LOGE(TAG, "ROI ack no enviado: req=%s err=%s", req_id,
+             esp_err_to_name(err));
+}
+
+static void handle_roi_set(const cJSON *root) {
+  roi_def_t rois[ROI_MAX];
+  size_t count = 0;
+  uint32_t version = 0;
+  char req_id[ROI_REQ_ID_SIZE] = {0};
+  roi_cmd_extract_req_id(root, req_id, sizeof(req_id));
+
+  roi_err_t result = roi_cmd_parse_set(root, rois, &count, &version);
+  if (result != ROI_OK) {
+    ESP_LOGW(TAG, "ROI set rechazado: req=%s error=%s",
+             req_id[0] ? req_id : "?", roi_error_code(result));
+    if (req_id[0])
+      roi_send_ack(req_id, false, 0, 0, roi_error_code(result));
+    return;
+  }
+
+  ESP_LOGI(TAG, "ROI set: version=%lu count=%u", (unsigned long)version,
+           (unsigned)count);
+  esp_err_t err = roi_store_save(rois, count, version);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "ROI set sin guardar: req=%s error=nvs_error", req_id);
+    roi_send_ack(req_id, false, 0, 0, "nvs_error");
+    return;
+  }
+  roi_send_ack(req_id, true, version, count, NULL);
 }
 
 static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
@@ -284,139 +360,54 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
       }
       s_registered = true;
       send_status_and_subscribe();
-    } else if (event->topic_len > 0 && s_registered &&
-               event->topic_len >= 8 &&
-               !memcmp(event->topic + event->topic_len - 8, "/command", 8)) {
-      /* Rama JSON para comandos en .../shelf_cam/command. */
+    } else if (event->topic_len > 0 && s_registered && s_cmd_topic[0] &&
+               event->topic_len == (int)strlen(s_cmd_topic) &&
+               !memcmp(event->topic, s_cmd_topic, event->topic_len)) {
+      /* Solo el topico exacto .../shelf_cam/command; control/command queda fuera. */
       if (event->current_data_offset != 0 ||
           event->data_len != event->total_data_len ||
-          event->data_len <= 0 || event->data_len >= EVENT_BYTES) {
+          event->data_len <= 0 || event->data_len >= (int)MQTT_CMD_BYTES) {
         ESP_LOGW(TAG, "Comando fragmentado o demasiado grande; ignorado");
         break;
       }
-      /* Copiar payload a buffer local con terminador. */
-      char cmd_buf[EVENT_BYTES];
-      memcpy(cmd_buf, event->data, event->data_len);
-      cmd_buf[event->data_len] = '\0';
 
-      /* Extraer "type" del JSON de forma simple (sin cJSON). */
-      char cmd_type[33] = {0};
-      const char *t = strstr(cmd_buf, "\"type\"");
-      if (t) {
-        t = strchr(t, ':');
-        if (t) {
-          t++;
-          while (*t == ' ' || *t == '"') t++;
-          int i = 0;
-          while (*t && *t != '"' && *t != ',' && *t != '}' && i < 32) {
-            cmd_type[i++] = *t++;
-          }
-          cmd_type[i] = '\0';
-        }
+      cJSON *root = cJSON_ParseWithLength(event->data, event->data_len);
+      if (!root) {
+        char req_id[ROI_REQ_ID_SIZE] = {0};
+        roi_cmd_extract_req_id_raw(event->data, event->data_len, req_id,
+                                   sizeof(req_id));
+        ESP_LOGW(TAG, "Comando JSON invalido; req=%s",
+                 req_id[0] ? req_id : "?");
+        if (req_id[0])
+          roi_send_ack(req_id, false, 0, 0,
+                       roi_error_code(ROI_ERR_INVALID_JSON));
+        break;
       }
 
-      ESP_LOGI(TAG, "Comando recibido: type=%s", cmd_type);
+      const cJSON *type_item = cJSON_GetObjectItemCaseSensitive(root, "type");
+      const char *cmd_type =
+          cJSON_IsString(type_item) ? type_item->valuestring : "";
+      ESP_LOGI(TAG, "Comando recibido: type=%s",
+               cmd_type[0] ? cmd_type : "?");
 
-      if (!strcmp(cmd_type, "snapshot.request")) {
-        /* Extraer req_id. */
-        char req_id[65] = {0};
-        const char *r = strstr(cmd_buf, "\"req_id\"");
-        if (r) {
-          r = strchr(r, ':');
-          if (r) {
-            r++;
-            while (*r == ' ' || *r == '"') r++;
-            int i = 0;
-            while (*r && *r != '"' && *r != ',' && *r != '}' && i < 64) {
-              req_id[i++] = *r++;
-            }
-            req_id[i] = '\0';
-          }
-        }
-        if (!req_id[0]) {
-          strcpy(req_id, "no-req-id");
-        }
-
-        ESP_LOGI(TAG, "snapshot.request req_id=%s; capturando...", req_id);
-
-        camera_fb_t *frame = camera_capture();
-        if (!frame || !frame->buf || frame->len == 0 ||
-            frame->format != PIXFORMAT_GRAYSCALE) {
-          ESP_LOGE(TAG, "snapshot: captura invalida");
-          if (frame) camera_release(frame);
-          break;
-        }
-
-        uint8_t *jpg_buf = NULL;
-        size_t jpg_len = 0;
-        bool ok = frame2jpg(frame, 12, &jpg_buf, &jpg_len);
-        size_t w = frame->width, h = frame->height;
-        camera_release(frame);
-
-        if (!ok || !jpg_buf || jpg_len == 0) {
-          ESP_LOGE(TAG, "snapshot: frame2jpg fallo");
-          if (jpg_buf) free(jpg_buf);
-          break;
-        }
-
-        ESP_LOGI(TAG, "snapshot: JPEG %ux%u, %u bytes; enviando al gateway",
-                 (unsigned)w, (unsigned)h, (unsigned)jpg_len);
-
-        /* Obtener IP del gateway desde s_uri (mqtt://IP:port). */
-        char gw_ip[IPV4_TEXT_SIZE] = {0};
-        const char *uri = s_uri;
-        if (uri && !strncmp(uri, "mqtt://", 7)) {
-          const char *ip_start = uri + 7;
-          const char *ip_end = strchr(ip_start, ':');
-          if (!ip_end) ip_end = ip_start + strlen(ip_start);
-          size_t ip_len = ip_end - ip_start;
-          if (ip_len > 0 && ip_len < IPV4_TEXT_SIZE) {
-            memcpy(gw_ip, ip_start, ip_len);
-            gw_ip[ip_len] = '\0';
-          }
-        }
-        if (!gw_ip[0]) {
-          ESP_LOGE(TAG, "snapshot: no se pudo obtener IP del gateway");
-          free(jpg_buf);
-          break;
-        }
-
-        char url[128];
-        snprintf(url, sizeof(url), "http://%s:80/camera/snapshot", gw_ip);
-
-        esp_http_client_config_t http_cfg = {
-          .url = url,
-          .method = HTTP_METHOD_POST,
-          .timeout_ms = 10000,
-        };
-        esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-        if (!client) {
-          ESP_LOGE(TAG, "snapshot: no se pudo crear cliente HTTP");
-          free(jpg_buf);
-          break;
-        }
-
-        esp_http_client_set_header(client, "Content-Type", "image/jpeg");
-        esp_http_client_set_header(client, "X-Req-Id", req_id);
-        esp_http_client_set_header(client, "X-Node-Id", s_esp_id);
-        esp_http_client_set_header(client, "X-Branch-Id", s_branch_id);
-
-        esp_http_client_set_post_field(client, (const char *)jpg_buf, (int)jpg_len);
-
-        esp_err_t http_err = esp_http_client_perform(client);
-        int status = esp_http_client_get_status_code(client);
-        esp_http_client_cleanup(client);
-        free(jpg_buf);
-
-        if (http_err == ESP_OK && status >= 200 && status < 300) {
-          ESP_LOGI(TAG, "snapshot: enviado OK (HTTP %d)", status);
-        } else {
-          ESP_LOGE(TAG, "snapshot: fallo HTTP err=%s status=%d",
-                   esp_err_to_name(http_err), status);
-        }
+      if (!strcmp(cmd_type, "roi.set")) {
+        handle_roi_set(root);
+      } else if (!strcmp(cmd_type, "snapshot.request")) {
+        char req_id[ROI_REQ_ID_SIZE] = {0};
+        roi_cmd_extract_req_id(root, req_id, sizeof(req_id));
+        if (!req_id[0])
+          snprintf(req_id, sizeof(req_id), "%s", "no-req-id");
+        esp_err_t queued = camera_request_snapshot(req_id);
+        if (queued == ESP_OK)
+          ESP_LOGI(TAG, "snapshot.request req_id=%s; encolado en tarea de camara",
+                   req_id);
+        else
+          ESP_LOGE(TAG, "snapshot.request req_id=%s; no se pudo encolar: %s",
+                   req_id, esp_err_to_name(queued));
       } else {
         ESP_LOGI(TAG, "Comando no implementado aun: %s", cmd_type);
       }
+      cJSON_Delete(root);
     } else if (event->topic_len > 0) {
       ESP_LOGI(TAG,
                "Mensaje en tópico del sistema (comando; ejecución pendiente)");
@@ -663,6 +654,8 @@ esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port) {
         .credentials.client_id = s_client_id,
         .session.keepalive = MQTT_KEEPALIVE_SEC,
         .network.reconnect_timeout_ms = MQTT_RECONNECT_TIMEOUT_MS,
+        .buffer.size = MQTT_RX_BUFFER_BYTES,
+        .task.stack_size = MQTT_TASK_STACK_BYTES,
         .outbox.limit = MQTT_OUTBOX_BYTES,
     };
     s_client = esp_mqtt_client_init(&cfg);
@@ -678,6 +671,8 @@ esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port) {
   if (err == ESP_OK) {
     snprintf(s_uri, sizeof(s_uri), "%s", uri);
     s_running = true;
+    if (s_registered)
+      update_snapshot_target();
     ESP_LOGI(TAG, "[MQTT] broker=%s; identidad y cola RAM conservadas", s_uri);
   }
   xSemaphoreGive(s_client_lock);
