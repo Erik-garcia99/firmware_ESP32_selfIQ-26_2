@@ -58,6 +58,14 @@
 #define MQTT_RX_BUFFER_BYTES 2048U
 #define MQTT_TASK_STACK_BYTES 8192U
 
+/* Calibracion (E5.1): cola de comandos validados y consumidor unico.
+ * MQTT_CAL_STUB_HOLD_MS simula trabajo en el consumidor mientras no existan
+ * E5.2-E5.5; permite probar `busy`. Poner 0U al implementar el consumidor real. */
+#define MQTT_CAL_QUEUE_LEN 1U
+#define MQTT_CAL_TASK_STACK 4096U
+#define MQTT_CAL_TASK_PRIORITY 4U
+#define MQTT_CAL_STUB_HOLD_MS 3000U
+
 /* Call start/stop only from the connection owner (main), never MQTT callback. */
 esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port);
 void mqtt_network_stop(void);

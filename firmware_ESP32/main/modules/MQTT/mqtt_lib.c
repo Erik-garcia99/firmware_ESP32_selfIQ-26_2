@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -21,6 +22,7 @@
 #include<global.h>
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/WIFI/wifi_lib.h"
+#include "modules/calibration/calibration_cmd.h"
 #include "modules/camera/camera_lib.h"
 #include "modules/roi/roi_cmd.h"
 #include "modules/roi/roi_core.h"
@@ -51,6 +53,11 @@ static char s_uri[MQTT_URI_SIZE];
 static char s_ack_topic[MQTT_ACK_TOPIC_SIZE];
 static char s_cmd_topic[MAX_TOPIC_LEN];
 static char s_cmd_ack_topic[MAX_TOPIC_LEN];
+/* Calibracion: buffers estaticos usados solo desde el hilo de eventos MQTT. */
+static QueueHandle_t s_cal_q;
+static TaskHandle_t s_cal_task;
+static cal_cmd_t s_cal_rx;
+static char s_cal_ack[CAL_ACK_JSON_SIZE];
 static uint32_t s_boot[MQTT_BOOT_WORDS], s_sequence;
 static struct {
   char id[MQTT_EVENT_ID_SIZE];
@@ -271,6 +278,91 @@ static void handle_roi_set(const cJSON *root) {
   roi_send_ack(req_id, true, version, count, NULL);
 }
 
+static bool cal_type(const char *type) {
+  return type && !strncmp(type, "calibrat", 8);
+}
+
+/* Callback MQTT: solo parsea, valida y encola; sin E/S pesada. */
+static void handle_cal_cmd(const char *data, int len) {
+  cal_cmd_status_t st;
+  cal_cmd_err_t e = cal_cmd_parse(data, (size_t)len, &s_cal_rx, &st);
+  if (e == CAL_CMD_OK)
+    e = cal_cmd_check_target(&s_cal_rx, s_branch_id, s_esp_id);
+  if (e == CAL_CMD_OK &&
+      (!s_cal_q || xQueueSend(s_cal_q, &s_cal_rx, 0) != pdTRUE))
+    e = CAL_CMD_E_BUSY;
+  if (e == CAL_CMD_OK) {
+    ESP_LOGI(TAG, "[CAL] comando valido encolado");
+    return;
+  }
+  ESP_LOGW(TAG, "[CAL] comando rechazado: err=%d", (int)e);
+  if (!cal_ack_error(s_cal_ack, sizeof(s_cal_ack), &st, e)) {
+    ESP_LOGE(TAG, "[CAL] ACK de error no construido");
+    return;
+  }
+  esp_err_t err = mqtt_publish_ack_json(s_cal_ack);
+  if (err != ESP_OK)
+    ESP_LOGE(TAG, "[CAL] ACK de error no enviado: %s", esp_err_to_name(err));
+}
+static void cal_worker(void *arg) {
+  (void)arg;
+  cal_cmd_t cmd;
+  for (;;) {
+    if (xQueueReceive(s_cal_q, &cmd, portMAX_DELAY) != pdTRUE)
+      continue;
+    ESP_LOGI(TAG, "[CAL] comando aceptado: action=%s roi=%s cfg=%lu",
+             cal_action_name(cmd.action), cmd.roi_id,
+             (unsigned long)cmd.config_version);
+
+    /* Simula el trabajo real de E5.3–E5.5: da tiempo a que llegue un
+     * roi.set concurrente. Poner MQTT_CAL_STUB_HOLD_MS=0 al integrar E5.3. */
+#if MQTT_CAL_STUB_HOLD_MS > 0
+    vTaskDelay(pdMS_TO_TICKS(MQTT_CAL_STUB_HOLD_MS));
+#endif
+
+    /* ==== E5.2: re-verificar contexto ANTES de emitir cualquier ACK ==== */
+    roi_blob_t snap;
+    bool known = false;
+    uint32_t applied = 0;
+    if (roi_store_snapshot(&snap)) {
+      applied = snap.config_version;
+      for (size_t i = 0; i < snap.count; ++i) {
+        /* rois[i].id ya es un UUID en texto (igual que en calibration_store.c) */
+        if (!strcmp(snap.rois[i].id, cmd.roi_id)) {
+          known = true;
+          break;
+        }
+      }
+    }
+
+    cal_cmd_err_t e = cal_cmd_check_context(&cmd, known, applied);
+    if (e != CAL_CMD_OK) {
+      ESP_LOGW(TAG, "[CAL] comando rechazado: err=%d (%s)", (int)e,
+               cal_cmd_error_code(e));
+      char ack[CAL_ACK_JSON_SIZE];
+      cal_cmd_status_t st = {.err = e, .action_hint = cmd.action};
+      memcpy(st.operation_id,  cmd.operation_id,  sizeof st.operation_id);
+      memcpy(st.req_id,        cmd.req_id,        sizeof st.req_id);
+      memcpy(st.calibration_id, cmd.calibration_id, sizeof st.calibration_id);
+      memcpy(st.roi_id,        cmd.roi_id,        sizeof st.roi_id);
+      if (cal_ack_error(ack, sizeof ack, &st, e)) {
+        esp_err_t perr = mqtt_publish_ack_json(ack);
+        if (perr != ESP_OK)
+          ESP_LOGE(TAG, "[CAL] ACK de contexto no enviado: %s",
+                   esp_err_to_name(perr));
+      } else {
+        ESP_LOGE(TAG, "[CAL] ACK de contexto no construido");
+      }
+      continue;
+    }
+
+    /* Contexto OK. Aquí E5.3+ captura/persiste. De momento, sin ACK de
+     * éxito: E5.2 solo introduce el rechazo por contexto. */
+    ESP_LOGI(TAG, "[CAL] contexto OK (config_version=%lu)",
+             (unsigned long)applied);
+  }
+}
+
 static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
                        void *event_data) {
   esp_mqtt_event_handle_t event = event_data;
@@ -373,6 +465,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
 
       cJSON *root = cJSON_ParseWithLength(event->data, event->data_len);
       if (!root) {
+        if (memmem(event->data, event->data_len, "calibrat", 8)) {
+          handle_cal_cmd(event->data, event->data_len);
+          break;
+        }
         char req_id[ROI_REQ_ID_SIZE] = {0};
         roi_cmd_extract_req_id_raw(event->data, event->data_len, req_id,
                                    sizeof(req_id));
@@ -390,7 +486,9 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
       ESP_LOGI(TAG, "Comando recibido: type=%s",
                cmd_type[0] ? cmd_type : "?");
 
-      if (!strcmp(cmd_type, "roi.set")) {
+      if (cal_type(cmd_type)) {
+        handle_cal_cmd(event->data, event->data_len);
+      } else if (!strcmp(cmd_type, "roi.set")) {
         handle_roi_set(root);
       } else if (!strcmp(cmd_type, "snapshot.request")) {
         char req_id[ROI_REQ_ID_SIZE] = {0};
@@ -635,6 +733,14 @@ esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port) {
   }
   if (!s_retry_task && xTaskCreate(registration_retry, "mqtt_retry", MQTT_RETRY_TASK_STACK, NULL,
                                    MQTT_RETRY_TASK_PRIORITY, &s_retry_task) != pdPASS)
+    return ESP_ERR_NO_MEM;
+  if (!s_cal_q) {
+    s_cal_q = xQueueCreate(MQTT_CAL_QUEUE_LEN, sizeof(cal_cmd_t));
+    if (!s_cal_q)
+      return ESP_ERR_NO_MEM;
+  }
+  if (!s_cal_task && xTaskCreate(cal_worker, "cal_worker", MQTT_CAL_TASK_STACK, NULL,
+                                 MQTT_CAL_TASK_PRIORITY, &s_cal_task) != pdPASS)
     return ESP_ERR_NO_MEM;
   char uri[MQTT_URI_SIZE];
   snprintf(uri, sizeof(uri), "mqtt://%s:%u", broker_ip, (unsigned)broker_port);
