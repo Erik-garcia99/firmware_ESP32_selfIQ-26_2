@@ -12,6 +12,8 @@ idf_component_register(
         "modules/calibration/calibration_store.c"
         "modules/calibration/calibration_cmd.c"
         "modules/calibration/calibration_frame.c"
+        "modules/calibration/calibration_sha256.c"
+        "modules/calibration/calibration_capture.c"
 
     INCLUDE_DIRS
         "."

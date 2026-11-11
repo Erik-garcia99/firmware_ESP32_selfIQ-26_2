@@ -43,8 +43,13 @@ echo "calibration_core: compila limpio con -Werror"
   run core "$T/test_calibration_core.c" "$M/calibration_core.c"
 
 run frame "$T/test_calibration_frame.c" "$M/calibration_frame.c"
+run capture "$T/test_calibration_capture.c" "$M/calibration_capture.c" \
+            "$M/calibration_core.c" "$M/calibration_sha256.c"
 run cmd   "$T/test_calibration_cmd.c"   "$M/calibration_cmd.c" "$CJSON/cJSON.c"
 run flow  "$T/test_calibration_flow.c"  "$M/calibration_cmd.c" "$M/calibration_core.c" \
           "$M/calibration_frame.c" "$CJSON/cJSON.c"
+run e53_flow "$T/test_calibration_e53_flow.c" "$M/calibration_capture.c" \
+             "$M/calibration_core.c" "$M/calibration_sha256.c" \
+             "$M/calibration_frame.c"
 
 [[ $fail -eq 0 ]] && echo "TODAS LAS PRUEBAS HOST PASAN" || { echo "HAY FALLOS"; exit 1; }
