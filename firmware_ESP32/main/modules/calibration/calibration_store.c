@@ -177,7 +177,7 @@ esp_err_t calibration_store_init(void) {
     return ESP_OK;
 }
 
-esp_err_t calibration_store_get_draft(const char *roi_id, cal_store_pair_t *out) {
+static esp_err_t get_draft(const char *roi_id, cal_store_pair_t *out, bool current) {
     if (!out) return ESP_ERR_INVALID_ARG;
     char key[16];
     esp_err_t err = make_key('d', roi_id, key);
@@ -187,12 +187,16 @@ esp_err_t calibration_store_get_draft(const char *roi_id, cal_store_pair_t *out)
     if (err != ESP_OK) return err;
     err = load_blob(h, key, roi_id, out);
     nvs_close(h);
-    if (err == ESP_OK && !roi_matches(roi_id, out->config_version))
+    if (err == ESP_OK && current && !roi_matches(roi_id, out->config_version))
         return ESP_ERR_INVALID_STATE;
     return err;
 }
 
-esp_err_t calibration_store_get_active(const char *roi_id, cal_store_pair_t *out) {
+esp_err_t calibration_store_get_draft(const char *roi_id, cal_store_pair_t *out) {
+    return get_draft(roi_id, out, true);
+}
+
+static esp_err_t get_active(const char *roi_id, cal_store_pair_t *out, bool current) {
     if (!out) return ESP_ERR_INVALID_ARG;
     char key[16];
     esp_err_t err = make_key('a', roi_id, key);
@@ -208,9 +212,13 @@ esp_err_t calibration_store_get_active(const char *roi_id, cal_store_pair_t *out
     }
     nvs_close(h);
     if (err == ESP_OK && (!out->has_empty || !out->has_full ||
-                          !roi_matches(roi_id, out->config_version)))
+                          (current && !roi_matches(roi_id, out->config_version))))
         return ESP_ERR_INVALID_STATE;
     return err;
+}
+
+esp_err_t calibration_store_get_active(const char *roi_id, cal_store_pair_t *out) {
+    return get_active(roi_id, out, true);
 }
 
 esp_err_t calibration_store_save_draft(const cal_store_reference_t *ref) {
@@ -242,17 +250,30 @@ esp_err_t calibration_store_save_draft(const cal_store_reference_t *ref) {
         nvs_close(h);
         return err; /* Colision UUID o corrupcion: no sobrescribir. */
     }
+    if (pair.calibration_id[0]) {
+        if (strcmp(pair.calibration_id, ref->calibration_id)) {
+            /* El backend cerró la sesión anterior y su cancelación nunca llegó
+             * al nodo. Solo una versión mayor reemplaza el borrador: un replay
+             * tardío de una operación vieja no debe pisar la sesión vigente. */
+            if (ref->kind != CAL_STORE_EMPTY ||
+                ref->calibration_version <= pair.calibration_version) {
+                nvs_close(h);
+                return ESP_ERR_INVALID_STATE;
+            }
+            ESP_LOGW(TAG, "Borrador de sesión anterior reemplazado: %lu -> %lu",
+                     (unsigned long)pair.calibration_version,
+                     (unsigned long)ref->calibration_version);
+            memset(&pair, 0, sizeof(pair));
+        } else if (strcmp(pair.context_hash, ref->context_hash) ||
+                   pair.config_version != ref->config_version ||
+                   pair.calibration_version != ref->calibration_version) {
+            nvs_close(h);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
     if (ref->kind == CAL_STORE_FULL && !pair.has_empty) {
         nvs_close(h);
         return ESP_ERR_INVALID_STATE;
-    }
-    if (pair.calibration_id[0] &&
-        (strcmp(pair.calibration_id, ref->calibration_id) ||
-         strcmp(pair.context_hash, ref->context_hash) ||
-         pair.config_version != ref->config_version ||
-         pair.calibration_version != ref->calibration_version)) {
-        nvs_close(h);
-        return ESP_ERR_INVALID_STATE; /* Primero cancelar sesion anterior. */
     }
     memcpy(pair.roi_id, ref->roi_id, sizeof(pair.roi_id));
     memcpy(pair.calibration_id, ref->calibration_id, sizeof(pair.calibration_id));
@@ -342,6 +363,33 @@ esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_i
     if (err == ESP_OK) err = nvs_set_u8(h, selector_key, next);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    if (err == ESP_OK) {
+        /* E5.5: releer selector y banco recién escritos. El ACK de commit solo
+         * es cierto si el almacenamiento confirma el cambio. */
+        nvs_handle_t vh;
+        cal_store_pair_t check;
+        uint8_t confirmed = 0xFFU;
+        esp_err_t verr = nvs_open(CAL_STORE_NAMESPACE, NVS_READONLY, &vh);
+        if (verr == ESP_OK) {
+            if (selector(vh, roi_id, &confirmed) != ESP_OK || confirmed != next) {
+                verr = ESP_ERR_INVALID_STATE;
+            } else if (load_blob(vh, bank_key, roi_id, &check) != ESP_OK) {
+                verr = ESP_ERR_INVALID_STATE;
+            } else {
+                uint8_t expected[CAL_RECORD_LENGTH], actual[CAL_RECORD_LENGTH];
+                encode(&pair, expected);
+                encode(&check, actual);
+                if (memcmp(expected, actual, sizeof(expected)))
+                    verr = ESP_ERR_INVALID_CRC;
+            }
+            nvs_close(vh);
+        }
+        if (verr != ESP_OK) {
+            ESP_LOGE(TAG, "Pareja no verificable en NVS: %s",
+                     esp_err_to_name(verr));
+            err = verr;
+        }
+    }
     if (err == ESP_OK) ESP_LOGI(TAG, "Pareja activada version=%lu banco=%u",
                               (unsigned long)pair.calibration_version, (unsigned)next);
     return err;
@@ -374,4 +422,46 @@ esp_err_t calibration_store_cancel(const char *roi_id, const char *calibration_i
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
+}
+
+static bool status_entry(char *out, size_t size, const cal_store_pair_t *pair,
+                         bool draft) {
+    char empty[11] = "null", full[11] = "null";
+    if (pair->has_empty)
+        snprintf(empty, sizeof(empty), "\"%08lx\"", (unsigned long)
+                 crc32_bytes(pair->empty_descriptor, CAL_STORE_DESCRIPTOR_BYTES));
+    if (pair->has_full)
+        snprintf(full, sizeof(full), "\"%08lx\"", (unsigned long)
+                 crc32_bytes(pair->full_descriptor, CAL_STORE_DESCRIPTOR_BYTES));
+    int n = snprintf(out, size,
+                     "{\"calibration_version\":%lu,\"%s\":\"%s\","
+                     "\"empty_crc\":%s,\"full_crc\":%s}",
+                     (unsigned long)pair->calibration_version,
+                     draft ? "calibration_id" : "context_hash",
+                     draft ? pair->calibration_id : pair->context_hash,
+                     empty, full);
+    return n >= 0 && (size_t)n < size;
+}
+
+esp_err_t calibration_store_status_body(const char *roi_id, char *out, size_t size) {
+    if (!out || !size) return ESP_ERR_INVALID_ARG;
+    out[0] = '\0';
+    cal_store_pair_t pair;
+    char active[256] = "null", draft[256] = "null";
+    /* Status informa también historia de otra config_version: el backend
+     * compara el contexto. No confundir una pareja obsoleta con NVS corrupta. */
+    esp_err_t err = get_active(roi_id, &pair, false);
+    if (err == ESP_OK) {
+        if (!status_entry(active, sizeof(active), &pair, false)) return ESP_ERR_INVALID_SIZE;
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) return err;
+    err = get_draft(roi_id, &pair, false);
+    if (err == ESP_OK) {
+        if (!status_entry(draft, sizeof(draft), &pair, true)) return ESP_ERR_INVALID_SIZE;
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) return err;
+    int n = snprintf(out, size, "\"active\":%s,\"draft\":%s", active, draft);
+    if (n < 0 || (size_t)n >= size) {
+        out[0] = '\0';
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
 }

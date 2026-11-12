@@ -712,8 +712,12 @@ static void camera_task(void *arg)
                 vTaskDelay(pdMS_TO_TICKS(CAMERA_INIT_RETRY_MS));
                 continue;
             }
-            ESP_LOGI(TAG, "CAPTURE_STARTED: intervalo=%u ms; grises QVGA, 2 buffers PSRAM",
-                     (unsigned)CAMERA_CAPTURE_INTERVAL_MS);
+            ESP_LOGI(TAG,
+                     "CAPTURE_STARTED: intervalo=%u ms; grises %ux%u, %u buffers PSRAM",
+                     (unsigned)CAMERA_CAPTURE_INTERVAL_MS,
+                     (unsigned)CAMERA_CAL_FRAME_WIDTH,
+                     (unsigned)CAMERA_CAL_FRAME_HEIGHT,
+                     (unsigned)CAMERA_FRAME_BUFFER_COUNT);
         }
 
         TickType_t cycle_start = xTaskGetTickCount();

@@ -53,6 +53,9 @@ esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_i
                                    const char *empty_capture_id,
                                    const char *full_capture_id);
 esp_err_t calibration_store_get_active(const char *roi_id, cal_store_pair_t *out);
+/* Cuerpo JSON para status, desde NVS validada; ausencias son null, errores no.
+ * Un borrador parcial usa null para el CRC de la referencia aún inexistente. */
+esp_err_t calibration_store_status_body(const char *roi_id, char *out, size_t size);
 /* Borra exclusivamente borrador de esa sesion; no modifica la pareja activa. */
 esp_err_t calibration_store_cancel(const char *roi_id, const char *calibration_id);
 

@@ -10,9 +10,13 @@
 #include "modules/calibration/calibration_capture.h"
 #include "modules/calibration/calibration_frame.h"
 
-/* Etapa 1: captura JPEG QVGA para verificar estabilidad junto con Wi-Fi. */
+/* Captura JPEG gris. El sensor del nodo es OV3660 (2048x1536): a QVGA se
+ * descartaba el 97.6% de los pixeles y cada ROI quedaba con ~1 px por celda
+ * del descriptor 8x8. VGA (640x480) cuadruplica la densidad y coincide con
+ * camera_frame_width/height del esquema. Bajarla a QVGA solo si falta RAM
+ * (VGA gris usa 307200 B por buffer, x2 en PSRAM). */
 #define CAMERA_XCLK_HZ 20000000U
-#define CAMERA_INITIAL_FRAME_SIZE FRAMESIZE_QVGA
+#define CAMERA_INITIAL_FRAME_SIZE FRAMESIZE_VGA
 #define CAMERA_JPEG_QUALITY 12
 #define CAMERA_JPEG_QUALITY_MIN 0
 #define CAMERA_JPEG_QUALITY_MAX 63
@@ -28,16 +32,19 @@
 #define CAMERA_SNAPSHOT_QUEUE_LEN 4U
 
 /* E5.3: contrato de frame de calibración. Debe coincidir con la resolución
- * configurada arriba y con la huella de contexto del backend (320x240). */
-#define CAMERA_CAL_FRAME_WIDTH 320U
-#define CAMERA_CAL_FRAME_HEIGHT 240U
+ * configurada arriba y con la huella de contexto del backend (640x480).
+ * Cambiar cualquiera de los dos exige subir camera_visual_revision en
+ * esp32_node: el trigger marca las zonas como needs_recalibration. */
+#define CAMERA_CAL_FRAME_WIDTH 640U
+#define CAMERA_CAL_FRAME_HEIGHT 480U
 
 /* Una sola operación física pendiente. Si la cola está llena, el consumidor
  * MQTT responde `busy`; nunca se encola una segunda captura en silencio. */
 #define CAMERA_CAL_QUEUE_LEN 1U
 #define CAMERA_CAL_FRAME_ATTEMPTS 4U
 #define CAMERA_CAL_FRAME_RETRY_MS 40U
-#define CAMERA_CAL_MAX_JPEG_BYTES (64U * 1024U)
+/* VGA gris con quality 12 ronda 40-70 KB; 64 KB rechazaba capturas buenas. */
+#define CAMERA_CAL_MAX_JPEG_BYTES (96U * 1024U)
 #define CAMERA_CAL_MULTIPART_BYTES (CAMERA_CAL_MAX_JPEG_BYTES + 2048U)
 
 /* Uploader independiente: nunca comparte la tarea de cámara. La cola es

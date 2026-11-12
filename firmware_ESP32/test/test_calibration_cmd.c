@@ -47,12 +47,12 @@ static const char *COMMIT =
 static const char *CANCEL =
     "{\"schema_version\":1,\"type\":\"calibration.cancel\",\"id\":\"" OP
     "\",\"req_id\":\"" REQ "\",\"calibration_id\":\"" CAL
-    "\",\"roi_id\":\"" ROI "\",\"context_hash\":\"" H64 "\"}";
+    "\",\"calibration_version\":12,\"roi_id\":\"" ROI "\",\"context_hash\":\"" H64 "\"}";
 
 static const char *STATUS =
     "{\"schema_version\":1,\"type\":\"calibration.status\",\"id\":\"" OP
     "\",\"req_id\":\"" REQ "\",\"calibration_id\":\"" CAL
-    "\",\"roi_id\":\"" ROI "\"}";
+    "\",\"calibration_version\":12,\"roi_id\":\"" ROI "\"}";
 
 static cal_cmd_err_t parse(const char *s, cal_cmd_t *c, cal_cmd_status_t *st) {
   return cal_cmd_parse(s, strlen(s), c, st);
@@ -117,7 +117,7 @@ static void test_parse_valid(void) {
   CHECK(!strcmp(c.pair_hash, H64B));
 
   CHECK(parse(CANCEL, &c, &st) == CAL_CMD_OK && c.action == CAL_ACTION_CANCEL);
-  CHECK(!strcmp(c.context_hash, H64) && c.calibration_version == 0);
+  CHECK(!strcmp(c.context_hash, H64) && c.calibration_version == 12);
 
   CHECK(parse(STATUS, &c, &st) == CAL_CMD_OK && c.action == CAL_ACTION_STATUS);
   CHECK(c.context_hash[0] == '\0' && c.config_version == 0);
@@ -396,16 +396,27 @@ static void test_acks(void) {
   printf("  tamano: commit=%zu B, ACK commit=%zu B\n", strlen(COMMIT), strlen(ack));
 
   CHECK(parse(CANCEL, &c, &st) == CAL_CMD_OK);
+  CHECK(c.calibration_version == 12);
   CHECK(cal_ack_cancel(ack, sizeof ack, &c));
+  CHECK(strstr(ack, "\"calibration_version\":12"));
   CHECK(strstr(ack, "\"action\":\"cancel\"") && strstr(ack, "\"status\":\"cancelled\""));
+  snprintf(js, sizeof(js), "%s", CANCEL);
+  swap(js, sizeof(js), "calibration_version", "ignored_version");
+  CHECK(parse(js, &c, &st) == CAL_CMD_E_INVALID_REQUEST);
   root = cJSON_Parse(ack);
   CHECK(root != NULL);
   cJSON_Delete(root);
 
   CHECK(parse(STATUS, &c, &st) == CAL_CMD_OK);
+  CHECK(c.calibration_version == 12);
   CHECK(cal_ack_status(ack, sizeof ack, &c,
                        "\"active\":null,\"draft\":null,\"last_results\":[]"));
   CHECK(strstr(ack, "\"action\":\"status\"") && strstr(ack, "\"status\":\"reported\""));
+  CHECK(strstr(ack, "\"calibration_version\":12"));
+  snprintf(js, sizeof(js), "%s", STATUS);
+  swap(js, sizeof(js), "calibration_version", "ignored_version");
+  CHECK(parse(js, &c, &st) == CAL_CMD_E_INVALID_REQUEST);
+  CHECK(parse(STATUS, &c, &st) == CAL_CMD_OK);
   root = cJSON_Parse(ack);
   CHECK(root != NULL);
   cJSON_Delete(root);

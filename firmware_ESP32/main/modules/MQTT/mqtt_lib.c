@@ -423,8 +423,18 @@ static void cal_result_handler(const camera_cal_result_t *result) {
 
 static void cal_worker(void *arg) {
   (void)arg;
-  cal_cmd_t cmd;
+  /* Propiedad exclusiva de esta única tarea. No compartir s_cal_ack/s_cal_rx:
+   * pertenecen al callback MQTT, que puede ejecutarse al mismo tiempo.
+   * Evita apilar cmd + snapshot ROI + JSON sobre las llamadas profundas NVS. */
+  static cal_cmd_t cmd;
+  static roi_blob_t snap;
+  static camera_cal_request_t request;
+  static char ack[CAL_ACK_JSON_SIZE];
+  static char body[768];
   for (;;) {
+    ESP_LOGI(TAG, "[CAL] worker stack_min_free=%u bytes budget=%u",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned)MQTT_CAL_TASK_STACK);
     if (xQueueReceive(s_cal_q, &cmd, portMAX_DELAY) != pdTRUE)
       continue;
     ESP_LOGI(TAG, "[CAL] comando aceptado: action=%s roi=%s cfg=%lu",
@@ -436,7 +446,6 @@ static void cal_worker(void *arg) {
 #endif
 
     /* ==== E5.2: re-verificar contexto ANTES de emitir cualquier ACK ==== */
-    roi_blob_t snap;
     bool known = false;
     uint32_t applied = 0;
     if (roi_store_snapshot(&snap)) {
@@ -461,7 +470,6 @@ static void cal_worker(void *arg) {
     if (cmd.action == CAL_ACTION_CAPTURE) {
       /* E5.3: la captura la ejecuta la tarea propietaria de la cámara. El
        * consumidor solo encola metadatos; no toca esp_camera ni NVS. */
-      camera_cal_request_t request;
       memset(&request, 0, sizeof(request));
       memcpy(request.calibration_id, cmd.calibration_id,
              sizeof(request.calibration_id));
@@ -508,7 +516,6 @@ static void cal_worker(void *arg) {
         cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
         continue;
       }
-      char ack[CAL_ACK_JSON_SIZE];
       if (cal_ack_commit(ack, sizeof(ack), &cmd, cmd.calibration_version,
                          true)) {
         esp_err_t perr = mqtt_publish_ack_json(ack);
@@ -529,7 +536,6 @@ static void cal_worker(void *arg) {
         cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
         continue;
       }
-      char ack[CAL_ACK_JSON_SIZE];
       if (cal_ack_cancel(ack, sizeof(ack), &cmd)) {
         esp_err_t perr = mqtt_publish_ack_json(ack);
         if (perr != ESP_OK)
@@ -542,22 +548,12 @@ static void cal_worker(void *arg) {
     }
 
     if (cmd.action == CAL_ACTION_STATUS) {
-      cal_store_pair_t active;
-      cal_store_pair_t draft;
-      bool has_active = calibration_store_get_active(cmd.roi_id, &active) == ESP_OK;
-      bool has_draft = calibration_store_get_draft(cmd.roi_id, &draft) == ESP_OK;
-      char body[768];
-      int n = snprintf(
-          body, sizeof(body),
-          "\"active\":%s,\"draft\":%s",
-          has_active ? "{\"present\":true}" : "null",
-          has_draft ? "{\"present\":true}" : "null");
-      if (n < 0 || (size_t)n >= sizeof(body)) {
-        ESP_LOGE(TAG, "[CAL] status body demasiado grande");
+      esp_err_t err = calibration_store_status_body(cmd.roi_id, body, sizeof(body));
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[CAL] status NVS no verificable: %s", esp_err_to_name(err));
         cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
         continue;
       }
-      char ack[CAL_ACK_JSON_SIZE];
       if (cal_ack_status(ack, sizeof(ack), &cmd, body)) {
         esp_err_t perr = mqtt_publish_ack_json(ack);
         if (perr != ESP_OK)

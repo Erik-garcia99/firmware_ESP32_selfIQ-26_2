@@ -63,7 +63,9 @@
  * hay espera simulada. El macro se conserva en 0 para diagnosticos; si se
  * sube, solo retrasa la verificacion de contexto en el host. */
 #define MQTT_CAL_QUEUE_LEN 1U
-#define MQTT_CAL_TASK_STACK 4096U
+/* Bytes (ESP-IDF), no palabras. Incluye las llamadas NVS/JSON/MQTT anidadas.
+ * Medir el margen real con el log stack_min_free después de cada operación. */
+#define MQTT_CAL_TASK_STACK 8192U
 #define MQTT_CAL_TASK_PRIORITY 4U
 #define MQTT_CAL_STUB_HOLD_MS 0U
 

@@ -7,6 +7,9 @@
 #include "nvs.h"
 #include "../main/modules/roi/roi_store.h"
 #include "calibration_store.h"
+#ifdef CAL_CONTRACT_ACKS
+#include "calibration_cmd.h"
+#endif
 
 static roi_blob_t configured;
 const roi_blob_t *roi_store_current(void) {return &configured;}
@@ -23,6 +26,7 @@ bool roi_uuid_valid(const char *p) {
 typedef struct {char key[16]; unsigned char buf[MAX_PAYLOAD]; size_t len; bool occupied;} entry_t;
 static entry_t entries[MAX_KEYS];
 static int fail_selector_commit;
+static int corrupt_selector_commit;
 static char pending_selector[16];
 static uint8_t pending_selector_value;
 static bool has_pending_selector;
@@ -58,7 +62,8 @@ esp_err_t nvs_commit(nvs_handle_t h){
     (void)h;if(has_pending_selector){
         if(fail_selector_commit){has_pending_selector=false;fail_selector_commit=0;return ESP_FAIL;}
         entry_t *e=entry(pending_selector,true);if(!e)return ESP_ERR_NO_MEM;
-        e->buf[0]=pending_selector_value;e->len=1;has_pending_selector=false;
+        e->buf[0]=corrupt_selector_commit ? 2 : pending_selector_value;
+        corrupt_selector_commit=0;e->len=1;has_pending_selector=false;
     }
     return ESP_OK;
 }
@@ -86,25 +91,58 @@ static esp_err_t save(const char *cal,const char *capture,int kind, uint8_t n,ui
     r.config_version=7;r.calibration_version=ver;r.kind=kind;r.descriptor=&d;
     return calibration_store_save_draft(&r);
 }
+static void report_status(void) {
+    char body[768];
+    assert(calibration_store_status_body(ROI, body, sizeof(body)) == ESP_OK);
+    printf("STATUS_BODY {%s}\n", body);
+#ifdef CAL_CONTRACT_ACKS
+    cal_cmd_t cmd;
+    cal_cmd_status_t status;
+    char request[512];
+    int n = snprintf(request, sizeof(request),
+                     "{\"schema_version\":1,\"type\":\"calibration.status\","
+                     "\"id\":\"%s\",\"req_id\":\"%s\",\"calibration_id\":\"%s\","
+                     "\"roi_id\":\"%s\",\"calibration_version\":2147483647}",
+                     E1, F1, CAL1, ROI);
+    assert(n > 0 && (size_t)n < sizeof(request));
+    assert(cal_cmd_parse(request, strlen(request), &cmd, &status) == CAL_CMD_OK);
+    assert(cmd.calibration_version == 2147483647U);
+    char ack[CAL_ACK_JSON_SIZE];
+    assert(cal_ack_status(ack, sizeof(ack), &cmd, body));
+    printf("ACK_JSON %s\n", ack);
+    cmd.action = CAL_ACTION_CANCEL;
+    memcpy(cmd.context_hash, context, 65);
+    assert(cal_ack_cancel(ack, sizeof(ack), &cmd));
+    printf("ACK_JSON %s\n", ack);
+#endif
+}
 int main(void){
     memcpy(configured.rois[0].id,ROI,37);configured.count=1;configured.config_version=7;
     memset(context,'a',64);context[64]=0;
     assert(calibration_store_init()==ESP_OK);
     cal_store_pair_t p;
     assert(calibration_store_get_active(ROI,&p)==ESP_ERR_NVS_NOT_FOUND);
+    report_status();
     assert(save(CAL1,E1,CAL_STORE_EMPTY,10,1)==ESP_OK);
     assert(calibration_store_get_active(ROI,&p)==ESP_ERR_NVS_NOT_FOUND);
     assert(calibration_store_get_draft(ROI,&p)==ESP_OK && p.has_empty && !p.has_full);
+    report_status(); /* full_crc=null, no CRC inventado */
+    assert(save(CAL2,F2,CAL_STORE_FULL,170,2)==ESP_ERR_INVALID_STATE);
+    assert(save(CAL2,E2,CAL_STORE_EMPTY,20,1)==ESP_ERR_INVALID_STATE);
     assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_ERR_INVALID_STATE);
     assert(save(CAL1,F1,CAL_STORE_FULL,150,1)==ESP_OK);
+    report_status();
     assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_OK);
     assert(calibration_store_init()==ESP_OK); /* reinicio logico */
     assert(calibration_store_get_active(ROI,&p)==ESP_OK && p.calibration_version==1);
+    report_status();
     assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_OK); /* idempotencia */
     assert(save(CAL1,E1,CAL_STORE_EMPTY,11,1)==ESP_ERR_INVALID_STATE); /* ID reutilizado */
     assert(calibration_store_cancel(ROI,CAL1)==ESP_OK);
     assert(calibration_store_get_active(ROI,&p)==ESP_OK);
     assert(save(CAL2,E2,CAL_STORE_EMPTY,20,2)==ESP_OK);
+    report_status();
+    assert(save(CAL1,E1,CAL_STORE_EMPTY,10,1)==ESP_ERR_INVALID_STATE);
     assert(save(CAL2,F2,CAL_STORE_FULL,170,2)==ESP_OK);
     fail_selector_commit=1;
     assert(calibration_store_commit(ROI,CAL2,E2,F2)==ESP_FAIL);
@@ -112,9 +150,29 @@ int main(void){
     assert(calibration_store_commit(ROI,CAL2,E2,F2)==ESP_OK);
     assert(calibration_store_init()==ESP_OK);
     assert(calibration_store_get_active(ROI,&p)==ESP_OK && p.calibration_version==2);
+    report_status();
+    /* Nueva sesión sin recibir cancel de la anterior: solo empty de versión
+     * mayor puede sustituir el borrador; la pareja activa sigue intacta. */
+    assert(save(CAL1,E1,CAL_STORE_EMPTY,30,3)==ESP_OK);
+    assert(calibration_store_get_draft(ROI,&p)==ESP_OK && !p.has_full);
+    assert(calibration_store_get_active(ROI,&p)==ESP_OK && p.calibration_version==2);
+    assert(save(CAL2,F2,CAL_STORE_FULL,170,2)==ESP_ERR_INVALID_STATE);
+    assert(save(CAL1,F1,CAL_STORE_FULL,180,3)==ESP_OK);
+    corrupt_selector_commit=1;
+    assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_ERR_INVALID_STATE);
+    char body[768];
+    assert(calibration_store_status_body(ROI,body,sizeof(body))==ESP_ERR_INVALID_CRC);
+    assert(body[0]=='\0'); /* NVS corrupta no se presenta como active=null */
+    /* Restaurar selector previo para las siguientes comprobaciones. */
+    for (int i=0;i<MAX_KEYS;i++)
+        if (entries[i].occupied && entries[i].key[0]=='s') entries[i].buf[0]=1;
+    char tiny[8];
+    assert(calibration_store_status_body(ROI,tiny,sizeof(tiny))==ESP_ERR_INVALID_SIZE);
+    assert(tiny[0]=='\0');
     configured.config_version=8;
     assert(calibration_store_get_active(ROI,&p)==ESP_ERR_INVALID_STATE);
-    assert(calibration_store_cancel(ROI,CAL2)==ESP_OK); /* limpiar borrador obsoleto */
+    assert(calibration_store_status_body(ROI,body,sizeof(body))==ESP_OK);
+    assert(calibration_store_cancel(ROI,CAL1)==ESP_OK); /* limpiar borrador obsoleto */
     puts("PASS: borrador, pareja, reinicio logico, replay, cancel, fallo selector, version ROI");
     return 0;
 }

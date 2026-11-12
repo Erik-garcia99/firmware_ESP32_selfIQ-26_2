@@ -364,13 +364,13 @@ cal_cmd_err_t cal_cmd_parse_json(const cJSON *root, cal_cmd_t *cmd,
   cal_cmd_t next;
   memset(&next, 0, sizeof(next));
   next.action = action;
-  if (!take_identity(root, &next) || !take_optional_target(root, &next))
+  if (!take_identity(root, &next) || !take_optional_target(root, &next) ||
+      !take_uint(root, "calibration_version", 1, &next.calibration_version))
     return fail(st, CAL_CMD_E_INVALID_REQUEST);
 
   if (action == CAL_ACTION_CAPTURE || action == CAL_ACTION_COMMIT) {
     uint32_t format = 0;
-    if (!take_uint(root, "calibration_version", 1, &next.calibration_version) ||
-        !take_uint(root, "config_version", 0, &next.config_version) ||
+    if (!take_uint(root, "config_version", 0, &next.config_version) ||
         !take_str(root, "context_hash", cal_hash_hex_valid, next.context_hash,
                   sizeof(next.context_hash)) ||
         !take_uint(root, "format_version", 0, &format) ||
@@ -412,7 +412,7 @@ cal_cmd_err_t cal_cmd_parse_json(const cJSON *root, cal_cmd_t *cmd,
                   sizeof(next.context_hash)))
       return fail(st, CAL_CMD_E_INVALID_REQUEST);
   }
-  /* calibration.status solo lleva la identidad común. */
+  /* calibration.status lleva identidad y versión, también obligatoria en ACK. */
 
   next.semantic_fingerprint = cal_cmd_fingerprint(&next);
   *cmd = next;
@@ -590,7 +590,8 @@ bool cal_ack_cancel(char *out, size_t out_size, const cal_cmd_t *cmd) {
   out_t o;
   out_init(&o, out, out_size);
   out_head(&o, cmd, true, "cancelled");
-  out_fmt(&o, ",\"context_hash\":\"%s\"}", cmd->context_hash);
+  out_fmt(&o, ",\"calibration_version\":%lu,\"context_hash\":\"%s\"}",
+          (unsigned long)cmd->calibration_version, cmd->context_hash);
   return o.ok;
 }
 
@@ -601,6 +602,8 @@ bool cal_ack_status(char *out, size_t out_size, const cal_cmd_t *cmd,
   out_t o;
   out_init(&o, out, out_size);
   out_head(&o, cmd, true, "reported");
+  out_fmt(&o, ",\"calibration_version\":%lu",
+          (unsigned long)cmd->calibration_version);
   out_fmt(&o, "%s%s}", status_body[0] ? "," : "", status_body);
   return o.ok;
 }

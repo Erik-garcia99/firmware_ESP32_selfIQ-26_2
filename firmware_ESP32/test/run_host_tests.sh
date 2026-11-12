@@ -26,7 +26,9 @@ M="main/modules/calibration"
 T="$SCRIPT_DIR"
 
 CFLAGS=(-std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined
-        -fno-sanitize-recover=all -I"$CJSON" -I"$FW_ROOT/main" -I"$M")
+        -fno-sanitize-recover=all -Wno-error=deprecated-declarations
+        -D_POSIX_C_SOURCE=200809L
+        -I"$CJSON" -I"$FW_ROOT/main" -I"$M" -I"$T/stubs")
 
 OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 fail=0
@@ -45,6 +47,7 @@ echo "calibration_core: compila limpio con -Werror"
 run frame "$T/test_calibration_frame.c" "$M/calibration_frame.c"
 run capture "$T/test_calibration_capture.c" "$M/calibration_capture.c" \
             "$M/calibration_core.c" "$M/calibration_sha256.c"
+run store "$T/test_calibration_store.c" "$M/calibration_store.c" "$M/calibration_core.c"
 run cmd   "$T/test_calibration_cmd.c"   "$M/calibration_cmd.c" "$CJSON/cJSON.c"
 run flow  "$T/test_calibration_flow.c"  "$M/calibration_cmd.c" "$M/calibration_core.c" \
           "$M/calibration_frame.c" "$CJSON/cJSON.c"
