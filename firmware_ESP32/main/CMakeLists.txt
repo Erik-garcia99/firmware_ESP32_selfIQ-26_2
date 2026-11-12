@@ -8,6 +8,12 @@ idf_component_register(
         "modules/roi/roi_core.c"
         "modules/roi/roi_store.c"
         "modules/roi/roi_cmd.c"
+        "modules/calibration/calibration_core.c"
+        "modules/calibration/calibration_store.c"
+        "modules/calibration/calibration_cmd.c"
+        "modules/calibration/calibration_frame.c"
+        "modules/calibration/calibration_sha256.c"
+        "modules/calibration/calibration_capture.c"
 
     INCLUDE_DIRS
         "."
@@ -16,6 +22,7 @@ idf_component_register(
         "modules/MQTT"
         "modules/camera"
         "modules/roi"
+        "modules/calibration"
 
     REQUIRES
         mdns

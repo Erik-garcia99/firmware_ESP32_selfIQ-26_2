@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -14,6 +15,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "mqtt_client.h"
 #include "nvs.h"
@@ -21,6 +23,9 @@
 #include<global.h>
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/WIFI/wifi_lib.h"
+#include "modules/calibration/calibration_cmd.h"
+#include "modules/calibration/calibration_core.h"
+#include "modules/calibration/calibration_store.h"
 #include "modules/camera/camera_lib.h"
 #include "modules/roi/roi_cmd.h"
 #include "modules/roi/roi_core.h"
@@ -51,6 +56,14 @@ static char s_uri[MQTT_URI_SIZE];
 static char s_ack_topic[MQTT_ACK_TOPIC_SIZE];
 static char s_cmd_topic[MAX_TOPIC_LEN];
 static char s_cmd_ack_topic[MAX_TOPIC_LEN];
+/* Calibracion: buffers estaticos usados solo desde el hilo de eventos MQTT. */
+static QueueHandle_t s_cal_q;
+static TaskHandle_t s_cal_task;
+static cal_cmd_t s_cal_rx;
+static char s_cal_ack[CAL_ACK_JSON_SIZE];
+/* E5.4: comando de captura en curso, para persistir y emitir ACK `stored`. */
+static cal_cmd_t s_pending_cal_cmd;
+static bool s_has_pending_cal_cmd = false;
 static uint32_t s_boot[MQTT_BOOT_WORDS], s_sequence;
 static struct {
   char id[MQTT_EVENT_ID_SIZE];
@@ -271,6 +284,292 @@ static void handle_roi_set(const cJSON *root) {
   roi_send_ack(req_id, true, version, count, NULL);
 }
 
+static bool cal_type(const char *type) {
+  return type && !strncmp(type, "calibrat", 8);
+}
+
+/* Callback MQTT: solo parsea, valida y encola; sin E/S pesada. */
+static void handle_cal_cmd(const char *data, int len) {
+  cal_cmd_status_t st;
+  cal_cmd_err_t e = cal_cmd_parse(data, (size_t)len, &s_cal_rx, &st);
+  if (e == CAL_CMD_OK)
+    e = cal_cmd_check_target(&s_cal_rx, s_branch_id, s_esp_id);
+  if (e == CAL_CMD_OK &&
+      (!s_cal_q || xQueueSend(s_cal_q, &s_cal_rx, 0) != pdTRUE))
+    e = CAL_CMD_E_BUSY;
+  if (e == CAL_CMD_OK) {
+    ESP_LOGI(TAG, "[CAL] comando valido encolado");
+    return;
+  }
+  ESP_LOGW(TAG, "[CAL] comando rechazado: err=%d", (int)e);
+  if (!cal_ack_error(s_cal_ack, sizeof(s_cal_ack), &st, e)) {
+    ESP_LOGE(TAG, "[CAL] ACK de error no construido");
+    return;
+  }
+  esp_err_t err = mqtt_publish_ack_json(s_cal_ack);
+  if (err != ESP_OK)
+    ESP_LOGE(TAG, "[CAL] ACK de error no enviado: %s", esp_err_to_name(err));
+}
+
+/* ACK de error correlacionable para rechazos posteriores al parseo (contexto,
+ * cola de cámara llena). Usa solo la identidad que llegó en el comando. */
+static void cal_reply_error(const cal_cmd_t *cmd, cal_cmd_err_t err) {
+  cal_cmd_status_t st = {.err = err, .action_hint = cmd->action};
+  memcpy(st.operation_id, cmd->operation_id, sizeof st.operation_id);
+  memcpy(st.req_id, cmd->req_id, sizeof st.req_id);
+  memcpy(st.calibration_id, cmd->calibration_id, sizeof st.calibration_id);
+  memcpy(st.roi_id, cmd->roi_id, sizeof st.roi_id);
+  char ack[CAL_ACK_JSON_SIZE];
+  if (!cal_ack_error(ack, sizeof ack, &st, err)) {
+    ESP_LOGE(TAG, "[CAL] ACK de error no construido: err=%d", (int)err);
+    return;
+  }
+  esp_err_t perr = mqtt_publish_ack_json(ack);
+  if (perr != ESP_OK)
+    ESP_LOGE(TAG, "[CAL] ACK de error no enviado: %s", esp_err_to_name(perr));
+}
+
+/* E5.4: persiste el borrador en NVS y, solo si la escritura se verificó,
+ * emite el ACK `cal_result` con status=stored y persisted=true. Un fallo de
+ * NVS no genera ACK falso: el backend resuelve por timeout/`unknown`. */
+static void cal_result_handler(const camera_cal_result_t *result) {
+  if (!result) return;
+  if (result->status != CAMERA_CAL_OK) {
+    ESP_LOGW(TAG, "[CAL] captura rechazada: capture=%s code=%s detail=%s",
+             result->request.capture_id,
+             camera_cal_status_code(result->status),
+             result->detail ? result->detail : "?");
+    if (s_has_pending_cal_cmd) s_has_pending_cal_cmd = false;
+    return;
+  }
+
+  ESP_LOGI(TAG,
+           "[CAL] captura lista: capture=%s kind=%s crc=%08lx bytes=%lu "
+           "upload=%s",
+           result->request.capture_id,
+           result->request.kind == CAMERA_CAL_KIND_FULL ? "full" : "empty",
+           (unsigned long)result->descriptor_crc,
+           (unsigned long)result->image_bytes,
+           result->upload_enqueued ? "queued" : "skipped");
+
+  if (!s_has_pending_cal_cmd) {
+    ESP_LOGE(TAG, "[CAL] no hay comando pendiente para la captura %s",
+             result->request.capture_id);
+    return;
+  }
+  cal_cmd_t cmd = s_pending_cal_cmd;
+
+  /* Decodificar el descriptor serializado a la forma esperada por el store. */
+  cal_descriptor_t descriptor;
+  memset(&descriptor, 0, sizeof(descriptor));
+  if (cal_descriptor_decode(result->descriptor, result->descriptor_len,
+                            &descriptor) != CAL_OK) {
+    ESP_LOGE(TAG, "[CAL] descriptor inválido; no se persiste");
+    s_has_pending_cal_cmd = false;
+    return;
+  }
+
+  cal_store_reference_t ref;
+  memset(&ref, 0, sizeof(ref));
+  memcpy(ref.roi_id, cmd.roi_id, sizeof(ref.roi_id));
+  memcpy(ref.calibration_id, cmd.calibration_id, sizeof(ref.calibration_id));
+  memcpy(ref.context_hash, cmd.context_hash, sizeof(ref.context_hash));
+  ref.config_version = cmd.config_version;
+  ref.calibration_version = cmd.calibration_version;
+  memcpy(ref.capture_id, cmd.capture_id, sizeof(ref.capture_id));
+  ref.kind = cmd.kind == CAL_KIND_FULL ? CAL_STORE_FULL : CAL_STORE_EMPTY;
+  ref.descriptor = &descriptor;
+
+  esp_err_t err = calibration_store_save_draft(&ref);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "[CAL] NVS no guardó el borrador: %s",
+             esp_err_to_name(err));
+    s_has_pending_cal_cmd = false;
+    return;
+  }
+
+  /* ACK solo después de verificar la escritura. */
+  cal_capture_ack_t capture_ack;
+  memset(&capture_ack, 0, sizeof(capture_ack));
+  capture_ack.descriptor_crc = result->descriptor_crc;
+  memcpy(capture_ack.image_sha256, result->image_sha256,
+         sizeof(capture_ack.image_sha256));
+  capture_ack.image_bytes = result->image_bytes;
+  capture_ack.width = result->width;
+  capture_ack.height = result->height;
+  capture_ack.quality.mean = result->mean;
+  capture_ack.quality.contrast = result->contrast;
+  capture_ack.quality.clipped_pct = result->clipped_pct;
+  capture_ack.clock_quality = "unknown";
+  capture_ack.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+  capture_ack.persisted = true;
+
+  char ack[CAL_ACK_JSON_SIZE];
+  if (!cal_ack_capture(ack, sizeof(ack), &cmd, &capture_ack)) {
+    ESP_LOGE(TAG, "[CAL] ACK de captura no construido (demasiado grande)");
+    s_has_pending_cal_cmd = false;
+    return;
+  }
+  esp_err_t perr = mqtt_publish_ack_json(ack);
+  if (perr != ESP_OK) {
+    ESP_LOGE(TAG, "[CAL] ACK stored no enviado: %s",
+             esp_err_to_name(perr));
+  } else {
+    ESP_LOGI(TAG, "[CAL] borrador persistido y ACK stored enviado: capture=%s",
+             cmd.capture_id);
+  }
+  s_has_pending_cal_cmd = false;
+}
+
+static void cal_worker(void *arg) {
+  (void)arg;
+  /* Propiedad exclusiva de esta única tarea. No compartir s_cal_ack/s_cal_rx:
+   * pertenecen al callback MQTT, que puede ejecutarse al mismo tiempo.
+   * Evita apilar cmd + snapshot ROI + JSON sobre las llamadas profundas NVS. */
+  static cal_cmd_t cmd;
+  static roi_blob_t snap;
+  static camera_cal_request_t request;
+  static char ack[CAL_ACK_JSON_SIZE];
+  static char body[768];
+  for (;;) {
+    ESP_LOGI(TAG, "[CAL] worker stack_min_free=%u bytes budget=%u",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned)MQTT_CAL_TASK_STACK);
+    if (xQueueReceive(s_cal_q, &cmd, portMAX_DELAY) != pdTRUE)
+      continue;
+    ESP_LOGI(TAG, "[CAL] comando aceptado: action=%s roi=%s cfg=%lu",
+             cal_action_name(cmd.action), cmd.roi_id,
+             (unsigned long)cmd.config_version);
+
+#if MQTT_CAL_STUB_HOLD_MS > 0
+    vTaskDelay(pdMS_TO_TICKS(MQTT_CAL_STUB_HOLD_MS));
+#endif
+
+    /* ==== E5.2: re-verificar contexto ANTES de emitir cualquier ACK ==== */
+    bool known = false;
+    uint32_t applied = 0;
+    if (roi_store_snapshot(&snap)) {
+      applied = snap.config_version;
+      for (size_t i = 0; i < snap.count; ++i) {
+        /* rois[i].id ya es un UUID en texto (igual que en calibration_store.c) */
+        if (!strcmp(snap.rois[i].id, cmd.roi_id)) {
+          known = true;
+          break;
+        }
+      }
+    }
+
+    cal_cmd_err_t e = cal_cmd_check_context(&cmd, known, applied);
+    if (e != CAL_CMD_OK) {
+      ESP_LOGW(TAG, "[CAL] comando rechazado: err=%d (%s)", (int)e,
+               cal_cmd_error_code(e));
+      cal_reply_error(&cmd, e);
+      continue;
+    }
+
+    if (cmd.action == CAL_ACTION_CAPTURE) {
+      /* E5.3: la captura la ejecuta la tarea propietaria de la cámara. El
+       * consumidor solo encola metadatos; no toca esp_camera ni NVS. */
+      memset(&request, 0, sizeof(request));
+      memcpy(request.calibration_id, cmd.calibration_id,
+             sizeof(request.calibration_id));
+      memcpy(request.roi_id, cmd.roi_id, sizeof(request.roi_id));
+      memcpy(request.capture_id, cmd.capture_id, sizeof(request.capture_id));
+      memcpy(request.context_hash, cmd.context_hash,
+             sizeof(request.context_hash));
+      memcpy(request.issued_at, cmd.issued_at, sizeof(request.issued_at));
+      request.config_version = cmd.config_version;
+      request.calibration_version = cmd.calibration_version;
+      request.kind = cmd.kind == CAL_KIND_FULL ? CAMERA_CAL_KIND_FULL
+                                               : CAMERA_CAL_KIND_EMPTY;
+      request.request_us = esp_timer_get_time();
+      s_pending_cal_cmd = cmd;
+      s_has_pending_cal_cmd = true;
+      esp_err_t err = camera_request_calibration(&request);
+      if (err != ESP_OK) {
+        s_has_pending_cal_cmd = false;
+      }
+      if (err == ESP_OK) {
+        ESP_LOGI(TAG,
+                 "[CAL] captura solicitada: capture=%s kind=%s (contexto OK, "
+                 "config_version=%lu)",
+                 request.capture_id,
+                 request.kind == CAMERA_CAL_KIND_FULL ? "full" : "empty",
+                 (unsigned long)applied);
+      } else if (err == ESP_ERR_NO_MEM) {
+        ESP_LOGW(TAG, "[CAL] camara ocupada; respondiendo busy");
+        cal_reply_error(&cmd, CAL_CMD_E_BUSY);
+      } else {
+        ESP_LOGE(TAG, "[CAL] no se pudo encolar captura: %s",
+                 esp_err_to_name(err));
+        cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
+      }
+      continue;
+    }
+
+    if (cmd.action == CAL_ACTION_COMMIT) {
+      esp_err_t err = calibration_store_commit(
+          cmd.roi_id, cmd.calibration_id, cmd.empty_capture_id,
+          cmd.full_capture_id);
+      if (err != ESP_OK) {
+        ESP_LOGW(TAG, "[CAL] commit rechazado: %s", esp_err_to_name(err));
+        cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
+        continue;
+      }
+      if (cal_ack_commit(ack, sizeof(ack), &cmd, cmd.calibration_version,
+                         true)) {
+        esp_err_t perr = mqtt_publish_ack_json(ack);
+        if (perr != ESP_OK)
+          ESP_LOGE(TAG, "[CAL] ACK commit no enviado: %s",
+                   esp_err_to_name(perr));
+      } else {
+        ESP_LOGE(TAG, "[CAL] ACK commit no construido");
+      }
+      continue;
+    }
+
+    if (cmd.action == CAL_ACTION_CANCEL) {
+      esp_err_t err =
+          calibration_store_cancel(cmd.roi_id, cmd.calibration_id);
+      if (err != ESP_OK) {
+        ESP_LOGW(TAG, "[CAL] cancel rechazado: %s", esp_err_to_name(err));
+        cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
+        continue;
+      }
+      if (cal_ack_cancel(ack, sizeof(ack), &cmd)) {
+        esp_err_t perr = mqtt_publish_ack_json(ack);
+        if (perr != ESP_OK)
+          ESP_LOGE(TAG, "[CAL] ACK cancel no enviado: %s",
+                   esp_err_to_name(perr));
+      } else {
+        ESP_LOGE(TAG, "[CAL] ACK cancel no construido");
+      }
+      continue;
+    }
+
+    if (cmd.action == CAL_ACTION_STATUS) {
+      esp_err_t err = calibration_store_status_body(cmd.roi_id, body, sizeof(body));
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[CAL] status NVS no verificable: %s", esp_err_to_name(err));
+        cal_reply_error(&cmd, CAL_CMD_E_INVALID_REQUEST);
+        continue;
+      }
+      if (cal_ack_status(ack, sizeof(ack), &cmd, body)) {
+        esp_err_t perr = mqtt_publish_ack_json(ack);
+        if (perr != ESP_OK)
+          ESP_LOGE(TAG, "[CAL] ACK status no enviado: %s",
+                   esp_err_to_name(perr));
+      } else {
+        ESP_LOGE(TAG, "[CAL] ACK status no construido");
+      }
+      continue;
+    }
+
+    ESP_LOGW(TAG, "[CAL] accion %s no implementada",
+             cal_action_name(cmd.action));
+  }
+}
+
 static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
                        void *event_data) {
   esp_mqtt_event_handle_t event = event_data;
@@ -373,6 +672,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
 
       cJSON *root = cJSON_ParseWithLength(event->data, event->data_len);
       if (!root) {
+        if (memmem(event->data, event->data_len, "calibrat", 8)) {
+          handle_cal_cmd(event->data, event->data_len);
+          break;
+        }
         char req_id[ROI_REQ_ID_SIZE] = {0};
         roi_cmd_extract_req_id_raw(event->data, event->data_len, req_id,
                                    sizeof(req_id));
@@ -390,7 +693,9 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
       ESP_LOGI(TAG, "Comando recibido: type=%s",
                cmd_type[0] ? cmd_type : "?");
 
-      if (!strcmp(cmd_type, "roi.set")) {
+      if (cal_type(cmd_type)) {
+        handle_cal_cmd(event->data, event->data_len);
+      } else if (!strcmp(cmd_type, "roi.set")) {
         handle_roi_set(root);
       } else if (!strcmp(cmd_type, "snapshot.request")) {
         char req_id[ROI_REQ_ID_SIZE] = {0};
@@ -635,6 +940,15 @@ esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port) {
   }
   if (!s_retry_task && xTaskCreate(registration_retry, "mqtt_retry", MQTT_RETRY_TASK_STACK, NULL,
                                    MQTT_RETRY_TASK_PRIORITY, &s_retry_task) != pdPASS)
+    return ESP_ERR_NO_MEM;
+  if (!s_cal_q) {
+    s_cal_q = xQueueCreate(MQTT_CAL_QUEUE_LEN, sizeof(cal_cmd_t));
+    if (!s_cal_q)
+      return ESP_ERR_NO_MEM;
+  }
+  camera_set_cal_result_handler(cal_result_handler);
+  if (!s_cal_task && xTaskCreate(cal_worker, "cal_worker", MQTT_CAL_TASK_STACK, NULL,
+                                 MQTT_CAL_TASK_PRIORITY, &s_cal_task) != pdPASS)
     return ESP_ERR_NO_MEM;
   char uri[MQTT_URI_SIZE];
   snprintf(uri, sizeof(uri), "mqtt://%s:%u", broker_ip, (unsigned)broker_port);

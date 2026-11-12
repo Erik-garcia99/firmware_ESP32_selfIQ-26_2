@@ -58,6 +58,17 @@
 #define MQTT_RX_BUFFER_BYTES 2048U
 #define MQTT_TASK_STACK_BYTES 8192U
 
+/* Calibracion (E5.1): cola de comandos validados y consumidor unico.
+ * E5.3 conecta el consumidor real con la tarea de camara, por lo que ya no
+ * hay espera simulada. El macro se conserva en 0 para diagnosticos; si se
+ * sube, solo retrasa la verificacion de contexto en el host. */
+#define MQTT_CAL_QUEUE_LEN 1U
+/* Bytes (ESP-IDF), no palabras. Incluye las llamadas NVS/JSON/MQTT anidadas.
+ * Medir el margen real con el log stack_min_free después de cada operación. */
+#define MQTT_CAL_TASK_STACK 8192U
+#define MQTT_CAL_TASK_PRIORITY 4U
+#define MQTT_CAL_STUB_HOLD_MS 0U
+
 /* Call start/stop only from the connection owner (main), never MQTT callback. */
 esp_err_t mqtt_register_start(const char *broker_ip, uint16_t broker_port);
 void mqtt_network_stop(void);

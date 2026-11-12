@@ -9,27 +9,28 @@
  ************************************************* */
 
 // liberias estanadar
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <fcntl.h>
 #include "esp_log.h"
 #include "esp_system.h"
-#include "nvs.h"
-#include "nvs_flash.h"
-#include "mdns.h"
-#include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "global.h"
-#include "modules/WIFI/wifi_lib.h"
-#include "modules/TCP/tcp_lib.h"
+#include "lwip/sockets.h"
+#include "mdns.h"
 #include "modules/MQTT/mqtt_lib.h"
+#include "modules/TCP/tcp_lib.h"
+#include "modules/WIFI/wifi_lib.h"
 #include "modules/camera/camera_lib.h"
+#include "modules/calibration/calibration_store.h"
 #include "modules/roi/roi_store.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Globals kept for the existing TCP library; recovery exchanges below have a
  * private socket and never run recv_task concurrently on that socket. */
@@ -46,95 +47,118 @@ TYPE_FRAME_T eType_frame;
 DATA_FIELD_T eData_field_t;
 char g_rpi_ip[IPV4_TEXT_SIZE];
 
-
 static const char *TAG = "MAIN";
+
+static void selfiq_log_nvs_stats(void);
 
 static uint64_t legacy_sum(const char *key, const void *anchor, uint8_t type) {
   uint64_t sum = 0;
-  while (*key) sum += (uint8_t)*key++;
-  if (type == eTCP_CRED) return sum + *(const uint16_t *)anchor;
+  while (*key)
+    sum += (uint8_t)*key++;
+  if (type == eTCP_CRED)
+    return sum + *(const uint16_t *)anchor;
   const char *p = anchor;
-  while (*p){
+  while (*p) {
     sum += (uint8_t)*p++;
-  } 
+  }
   return sum;
 }
 
 /* IEEE CRC32, format marker in upper bits. Legacy sums remain readable. */
 static uint32_t crc_byte(uint32_t crc, uint8_t byte) {
   crc ^= byte;
-  for (int n = 0; n < CRC32_BITS_PER_BYTE; ++n) crc = (crc >> 1) ^ (CRC32_POLYNOMIAL & (0U - (crc & 1U)));
+  for (int n = 0; n < CRC32_BITS_PER_BYTE; ++n)
+    crc = (crc >> 1) ^ (CRC32_POLYNOMIAL & (0U - (crc & 1U)));
   return crc;
 }
 uint64_t checksum(const char *key, const void *anchor, uint8_t type) {
   uint32_t crc = crc_byte(CRC32_INITIAL_VALUE, type);
-  do { 
-    crc = crc_byte(crc, (uint8_t)*key); 
-  }while (*key++);
-  
+  do {
+    crc = crc_byte(crc, (uint8_t)*key);
+  } while (*key++);
+
   if (type == eTCP_CRED) {
     uint16_t port = *(const uint16_t *)anchor;
-    crc = crc_byte(crc, port >> CRC32_PORT_HIGH_SHIFT); crc = crc_byte(crc, port & CRC32_PORT_LOW_MASK);
+    crc = crc_byte(crc, port >> CRC32_PORT_HIGH_SHIFT);
+    crc = crc_byte(crc, port & CRC32_PORT_LOW_MASK);
   } else {
     const char *p = anchor;
-    do { 
-      crc = crc_byte(crc, (uint8_t)*p); 
+    do {
+      crc = crc_byte(crc, (uint8_t)*p);
     } while (*p++);
   }
 
   return (CRC32_FORMAT_MARKER << CRC32_FORMAT_SHIFT) | (crc ^ CRC32_FINAL_XOR);
 }
 
-static bool checksum_valid(const char *key, const void *anchor, uint8_t type, uint64_t saved) {
+static bool checksum_valid(const char *key, const void *anchor, uint8_t type,
+                           uint64_t saved) {
   return saved == checksum(key, anchor, type) ||
-         (saved < CRC32_LEGACY_VALUE_LIMIT && saved == legacy_sum(key, anchor, type));
+         (saved < CRC32_LEGACY_VALUE_LIMIT &&
+          saved == legacy_sum(key, anchor, type));
 }
 
 static bool wifi_wait(void) {
-  EventBits_t bits = xEventGroupWaitBits(g_wifi_event_group,
-      WIFI_CONNECTED_BIT | WIFI_FAIL_BIT | WIFI_NO_CREDS_BIT,
-      pdFALSE, pdFALSE, pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
+  EventBits_t bits = xEventGroupWaitBits(
+      g_wifi_event_group,
+      WIFI_CONNECTED_BIT | WIFI_FAIL_BIT | WIFI_NO_CREDS_BIT, pdFALSE, pdFALSE,
+      pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
   return (bits & WIFI_CONNECTED_BIT) && esp_wifi.connected;
 }
-
 
 static bool fetch_wifi(char *ssid, char *password) {
   uint8_t data[TCP_RESPONSE_BUFFER_SIZE];
   int size = tcp_exchange(TCP_WIFI_REQUEST_OP, data, sizeof(data));
-  if (size < (int)TCP_WIFI_MIN_RESPONSE_LEN || data[TCP_WIFI_OPERATION_OFFSET] != TCP_WIFI_RESPONSE_OP || data[TCP_WIFI_SSID_ID_OFFSET] != eDataSSID) return false;
-  unsigned sl = data[TCP_WIFI_SSID_LENGTH_OFFSET], pos = TCP_WIFI_RESPONSE_FIELD_OFFSET + sl;
-  if (!sl || sl > SSID_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES > (unsigned)size || data[pos] != eDataPSWD) return false;
+  if (size < (int)TCP_WIFI_MIN_RESPONSE_LEN ||
+      data[TCP_WIFI_OPERATION_OFFSET] != TCP_WIFI_RESPONSE_OP ||
+      data[TCP_WIFI_SSID_ID_OFFSET] != eDataSSID)
+    return false;
+  unsigned sl = data[TCP_WIFI_SSID_LENGTH_OFFSET],
+           pos = TCP_WIFI_RESPONSE_FIELD_OFFSET + sl;
+  if (!sl || sl > SSID_LEN_MAX ||
+      pos + TCP_WIFI_FIELD_METADATA_BYTES > (unsigned)size ||
+      data[pos] != eDataPSWD)
+    return false;
   unsigned pl = data[pos + TCP_FIELD_LENGTH_OFFSET];
 
-  if (pl < PSWD_LEN_MIN || pl > PSWD_LEN_MAX || pos + TCP_WIFI_FIELD_METADATA_BYTES + pl != (unsigned)size ||
-      memchr(data + TCP_WIFI_RESPONSE_FIELD_OFFSET, 0, sl) || memchr(data + pos + TCP_WIFI_FIELD_METADATA_BYTES, 0, pl)){
-        return false;
-      } 
+  if (pl < PSWD_LEN_MIN || pl > PSWD_LEN_MAX ||
+      pos + TCP_WIFI_FIELD_METADATA_BYTES + pl != (unsigned)size ||
+      memchr(data + TCP_WIFI_RESPONSE_FIELD_OFFSET, 0, sl) ||
+      memchr(data + pos + TCP_WIFI_FIELD_METADATA_BYTES, 0, pl)) {
+    return false;
+  }
 
-  memcpy(ssid, data + TCP_WIFI_RESPONSE_FIELD_OFFSET, sl); ssid[sl] = 0;
-  memcpy(password, data + pos + TCP_WIFI_FIELD_METADATA_BYTES, pl); password[pl] = 0;
-  
+  memcpy(ssid, data + TCP_WIFI_RESPONSE_FIELD_OFFSET, sl);
+  ssid[sl] = 0;
+  memcpy(password, data + pos + TCP_WIFI_FIELD_METADATA_BYTES, pl);
+  password[pl] = 0;
+
   return strcmp(ssid, SSID_RPI) != 0;
 }
 
-
 static bool discover_broker(char *ip, uint16_t *port) {
   const char *hosts[] = {"selfiq-gateway", "raspberrypi", "rackiq-gateway"};
-  if (mdns_init() != ESP_OK) return false;
+  if (mdns_init() != ESP_OK)
+    return false;
   bool found = false;
   for (int i = 0; i < (int)(sizeof(hosts) / sizeof(hosts[0])) && !found; ++i) {
     esp_ip4_addr_t addr = {0};
-    if (mdns_query_a(hosts[i], MDNS_QUERY_TIMEOUT_MS, &addr) == ESP_OK && addr.addr) {
-      snprintf(ip, IPV4_TEXT_SIZE, IPSTR, IP2STR(&addr)); found = true;
+    if (mdns_query_a(hosts[i], MDNS_QUERY_TIMEOUT_MS, &addr) == ESP_OK &&
+        addr.addr) {
+      snprintf(ip, IPV4_TEXT_SIZE, IPSTR, IP2STR(&addr));
+      found = true;
     }
   }
   if (!found) {
     mdns_result_t *results = NULL;
-    if (mdns_query_srv("selfiq-broker", "_mqtt", "_tcp", MDNS_QUERY_TIMEOUT_MS, &results) == ESP_OK) {
+    if (mdns_query_srv("selfiq-broker", "_mqtt", "_tcp", MDNS_QUERY_TIMEOUT_MS,
+                       &results) == ESP_OK) {
       for (mdns_result_t *r = results; r && !found; r = r->next) {
         if (r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
-          snprintf(ip, IPV4_TEXT_SIZE, IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
-          if (r->port) *port = r->port;
+          snprintf(ip, IPV4_TEXT_SIZE, IPSTR,
+                   IP2STR(&r->addr->addr.u_addr.ip4));
+          if (r->port)
+            *port = r->port;
           found = true;
         }
       }
@@ -145,20 +169,44 @@ static bool discover_broker(char *ip, uint16_t *port) {
   return found;
 }
 
+
+
 void app_main(void) {
   /* Do not erase NVS automatically: identity/pending configuration matter. */
   esp_err_t err = nvs_flash_init();
+
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra", esp_err_to_name(err));
+    ESP_LOGE(TAG,
+             "[INTEGRITY] NVS_INIT_FAILED %s; requiere reparacion, no se borra",
+             esp_err_to_name(err));
     return;
   }
+
   /* ROI se carga antes de MQTT/camara para que un reinicio conserve las zonas. */
-  esp_err_t roi_err = roi_store_init();
-  if (roi_err == ESP_ERR_NVS_NOT_FOUND) {
-    ESP_LOGI(TAG, "[ROI] sin configuracion previa; se espera roi.set");
-  } else if (roi_err != ESP_OK) {
-    ESP_LOGE(TAG, "[ROI] NVS invalida (%s); se arranca sin zonas", esp_err_to_name(roi_err));
+  esp_err_t roi_lock_err = roi_store_lock_init();
+  if (roi_lock_err != ESP_OK) {
+    /* Sin mutex, roi_store_save fallará con ESP_ERR_INVALID_STATE.
+     * No es fatal: seguimos para que el diagnóstico por MQTT funcione. */
+    ESP_LOGE(TAG, "[ROI] no se pudo crear el mutex: %s",
+             esp_err_to_name(roi_lock_err));
+  } else {
+    esp_err_t roi_err = roi_store_init();
+    if (roi_err == ESP_ERR_NVS_NOT_FOUND) {
+      ESP_LOGI(TAG, "[ROI] sin configuracion previa; se espera roi.set");
+    } else if (roi_err != ESP_OK) {
+      ESP_LOGE(TAG, "[ROI] NVS invalida (%s); se arranca sin zonas",
+               esp_err_to_name(roi_err));
+    }
   }
+
+  esp_err_t cal_err = calibration_store_init();
+  if (cal_err != ESP_OK) {
+    ESP_LOGE(TAG, "[CAL] NVS no disponible: %s", esp_err_to_name(cal_err));
+  } else {
+    ESP_LOGI(TAG, "[CAL] almacenamiento v1 preparado; no hay capturas automáticas");
+  }
+
+  selfiq_log_nvs_stats();
   wifi_init_sta();
   /* La captura tiene su propia tarea y no depende de Internet/MQTT. */
   err = camera_start_task();
@@ -172,60 +220,85 @@ void app_main(void) {
     if (!esp_wifi.connected) {
       mqtt_network_stop();
       if (!on_ap && rounds < WIFI_NETWORK_ROUNDS) {
-        ESP_LOGW(TAG, "[NETWORK] ronda %u/%u, hasta %u intentos", rounds + 1, (unsigned)WIFI_NETWORK_ROUNDS, (unsigned)WIFI_TOTAL_CONNECT_ATTEMPTS);
+        ESP_LOGW(TAG, "[NETWORK] ronda %u/%u, hasta %u intentos", rounds + 1,
+                 (unsigned)WIFI_NETWORK_ROUNDS,
+                 (unsigned)WIFI_TOTAL_CONNECT_ATTEMPTS);
         ++rounds;
         wifi_connect_saved();
-        if (wifi_wait()){
-           rounds = 0; last_mqtt = 0; 
-           continue; 
-          }
-        if(xEventGroupGetBits(g_wifi_event_group) & WIFI_NO_CREDS_BIT){
-          rounds = WIFI_NETWORK_ROUNDS;
-        } 
-        if (rounds < WIFI_NETWORK_ROUNDS) { 
-          vTaskDelay(pdMS_TO_TICKS(WIFI_ROUND_RETRY_MS)); 
-          continue; 
+        if (wifi_wait()) {
+          rounds = 0;
+          last_mqtt = 0;
+          continue;
         }
-        ESP_LOGE(TAG, "[NETWORK] WIFI_RETRY_EXHAUSTED; buscando AP, sin borrar ni reiniciar");
+        if (xEventGroupGetBits(g_wifi_event_group) & WIFI_NO_CREDS_BIT) {
+          rounds = WIFI_NETWORK_ROUNDS;
+        }
+        if (rounds < WIFI_NETWORK_ROUNDS) {
+          vTaskDelay(pdMS_TO_TICKS(WIFI_ROUND_RETRY_MS));
+          continue;
+        }
+        ESP_LOGE(TAG, "[NETWORK] WIFI_RETRY_EXHAUSTED; buscando AP, sin borrar "
+                      "ni reiniciar");
       }
       if (wifi_set_credentials(SSID_RPI, PSWD_RPI) == ESP_OK && wifi_wait()) {
-        on_ap = true; last_probe = 0; last_mqtt = 0;
-        ESP_LOGI(TAG, "[NETWORK] LOCAL_AP_READY; broker %s:%u", RPI_IP_SETUP, (unsigned)MQTT_DEFAULT_PORT);
+        on_ap = true;
+        last_probe = 0;
+        last_mqtt = 0;
+        ESP_LOGI(TAG, "[NETWORK] LOCAL_AP_READY; broker %s:%u", RPI_IP_SETUP,
+                 (unsigned)MQTT_DEFAULT_PORT);
       } else {
         /* If gateway is absent, occasionally try saved router again. */
-        on_ap = false; rounds = 0;
-        ESP_LOGW(TAG, "[NETWORK] AP_UNREACHABLE; nuevo ciclo en %u ms", (unsigned)WIFI_RECOVER_MS);
+        on_ap = false;
+        rounds = 0;
+        ESP_LOGW(TAG, "[NETWORK] AP_UNREACHABLE; nuevo ciclo en %u ms",
+                 (unsigned)WIFI_RECOVER_MS);
         vTaskDelay(pdMS_TO_TICKS(WIFI_RECOVER_MS));
       }
       continue;
     }
     TickType_t now = xTaskGetTickCount();
-    if (!mqtt_network_connected() && (!last_mqtt || now - last_mqtt >= pdMS_TO_TICKS(WIFI_RECOVER_MS))) {
+    if (!mqtt_network_connected() &&
+        (!last_mqtt || now - last_mqtt >= pdMS_TO_TICKS(WIFI_RECOVER_MS))) {
       last_mqtt = now;
       uint16_t port = MQTT_DEFAULT_PORT;
       char ip[IPV4_TEXT_SIZE] = {0};
-      if (on_ap) snprintf(ip, sizeof(ip), "%s", RPI_IP_SETUP);
+      if (on_ap)
+        snprintf(ip, sizeof(ip), "%s", RPI_IP_SETUP);
       if (on_ap || discover_broker(ip, &port)) {
-        mqtt_register_start(ip, port); // can change broker without losing queued events
-      } else ESP_LOGW(TAG, "[MQTT] BROKER_NOT_FOUND; nuevo intento en %u ms", (unsigned)WIFI_RECOVER_MS);
+        mqtt_register_start(
+            ip, port); // can change broker without losing queued events
+      } else
+        ESP_LOGW(TAG, "[MQTT] BROKER_NOT_FOUND; nuevo intento en %u ms",
+                 (unsigned)WIFI_RECOVER_MS);
     }
-    if (on_ap && (!last_probe || now - last_probe >= pdMS_TO_TICKS(TCP_UPDATE_TIMEOUT_MS))) {
+    if (on_ap && (!last_probe ||
+                  now - last_probe >= pdMS_TO_TICKS(TCP_UPDATE_TIMEOUT_MS))) {
       last_probe = now;
-      
+
       uint8_t state[TCP_STATUS_BUFFER_SIZE];
       int n = tcp_exchange(TCP_STATUS_REQUEST_OP, state, sizeof(state));
 
-      if (n == TCP_STATUS_RESPONSE_LEN && state[TCP_STATUS_OPERATION_OFFSET] == TCP_STATUS_RESPONSE_OP && state[TCP_STATUS_VERSION_OFFSET] == TCP_STATUS_RESPONSE_VERSION) {
-        ESP_LOGI(TAG, "[TCP] wifi=%u backend=%u mqtt=%u storage=%u action=%u",
-                 state[TCP_STATUS_WIFI_OFFSET], state[TCP_STATUS_BACKEND_OFFSET], state[TCP_STATUS_MQTT_OFFSET], state[TCP_STATUS_STORAGE_OFFSET], state[TCP_STATUS_ACTION_OFFSET]);
+      if (n == TCP_STATUS_RESPONSE_LEN &&
+          state[TCP_STATUS_OPERATION_OFFSET] == TCP_STATUS_RESPONSE_OP &&
+          state[TCP_STATUS_VERSION_OFFSET] == TCP_STATUS_RESPONSE_VERSION) {
+        ESP_LOGI(
+            TAG, "[TCP] wifi=%u backend=%u mqtt=%u storage=%u action=%u",
+            state[TCP_STATUS_WIFI_OFFSET], state[TCP_STATUS_BACKEND_OFFSET],
+            state[TCP_STATUS_MQTT_OFFSET], state[TCP_STATUS_STORAGE_OFFSET],
+            state[TCP_STATUS_ACTION_OFFSET]);
         if (state[TCP_STATUS_ACTION_OFFSET] == TCP_STATUS_WIFI_UPDATE_ACTION) {
-          char ssid[SSID_LEN_MAX + TEXT_TERMINATOR_SIZE], password[PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE];
+          char ssid[SSID_LEN_MAX + TEXT_TERMINATOR_SIZE],
+              password[PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE];
           if (fetch_wifi(ssid, password)) {
             mqtt_network_stop();
             if (wifi_set_credentials(ssid, password) == ESP_OK && wifi_wait()) {
-              err = save_credentials(eWIFI_CRED); // commit ONLY after connection succeeds
-              ESP_LOGI(TAG, "[NETWORK] STA_RECOVERED; persistencia=%s", esp_err_to_name(err));
-              on_ap = false; rounds = 0; last_mqtt = 0;
+              err = save_credentials(
+                  eWIFI_CRED); // commit ONLY after connection succeeds
+              ESP_LOGI(TAG, "[NETWORK] STA_RECOVERED; persistencia=%s",
+                       esp_err_to_name(err));
+              on_ap = false;
+              rounds = 0;
+              last_mqtt = 0;
             } else {
               ESP_LOGW(TAG, "[NETWORK] STA_TRIAL_FAILED; regresando al AP");
               wifi_set_credentials(SSID_RPI, PSWD_RPI);
@@ -235,7 +308,9 @@ void app_main(void) {
             memset(password, 0, sizeof(password));
           }
         }
-      } else ESP_LOGW(TAG, "[TCP] STATUS_UNAVAILABLE; MQTT local continua, sin reinicio");
+      } else
+        ESP_LOGW(TAG,
+                 "[TCP] STATUS_UNAVAILABLE; MQTT local continua, sin reinicio");
     }
     vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_DELAY_MS));
   }
@@ -307,7 +382,8 @@ esp_err_t load_cred(uint8_t identifier) {
     uint64_t saved_sum = 0;
     // con buffer NULL, nvs_get_str solo devuelve el tamanio (incluye el '\0')
     ret = nvs_get_str(h, KEY_TCP_IP, NULL, &len);
-    if (ret == ESP_OK && (len < TCP_IP_NVS_MIN_SIZE || len > IPV4_TEXT_SIZE)) ret = ESP_ERR_INVALID_SIZE;
+    if (ret == ESP_OK && (len < TCP_IP_NVS_MIN_SIZE || len > IPV4_TEXT_SIZE))
+      ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       ip = malloc(len);
       if (ip == NULL) {
@@ -350,7 +426,9 @@ esp_err_t load_cred(uint8_t identifier) {
     uint64_t saved_sum = 0;
 
     ret = nvs_get_str(h, KEY_WIFI_SSID, NULL, &len_s);
-    if (ret == ESP_OK && (len_s < SSID_NVS_MIN_SIZE || len_s > SSID_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
+    if (ret == ESP_OK && (len_s < SSID_NVS_MIN_SIZE ||
+                          len_s > SSID_LEN_MAX + TEXT_TERMINATOR_SIZE))
+      ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       ssid = malloc(len_s);
       if (!ssid)
@@ -360,7 +438,9 @@ esp_err_t load_cred(uint8_t identifier) {
       ret = nvs_get_str(h, KEY_WIFI_SSID, ssid, &len_s);
     if (ret == ESP_OK)
       ret = nvs_get_str(h, KEY_WIFI_PSWD, NULL, &len_p);
-    if (ret == ESP_OK && (len_p < PSWD_LEN_MIN + TEXT_TERMINATOR_SIZE || len_p > PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE)) ret = ESP_ERR_INVALID_SIZE;
+    if (ret == ESP_OK && (len_p < PSWD_LEN_MIN + TEXT_TERMINATOR_SIZE ||
+                          len_p > PSWD_LEN_MAX + TEXT_TERMINATOR_SIZE))
+      ret = ESP_ERR_INVALID_SIZE;
     if (ret == ESP_OK) {
       pswd = malloc(len_p);
       if (!pswd)
@@ -427,3 +507,21 @@ esp_err_t erease_cred_nvs(uint8_t identifier) {
   return ret;
 }
 
+static void selfiq_log_nvs_stats(void) {
+  nvs_stats_t stats = {0};
+
+  esp_err_t err = nvs_get_stats(NULL, &stats);
+
+  if (err != ESP_OK) {
+    ESP_LOGE("SELFIQ_NVS", "No se pudieron consultar las estadisticas NVS: %s",
+             esp_err_to_name(err));
+    return;
+  }
+
+  ESP_LOGI("SELFIQ_NVS", "========== ESTADISTICAS NVS ==========");
+  ESP_LOGI("SELFIQ_NVS", "Entradas totales: %zu", stats.total_entries);
+  ESP_LOGI("SELFIQ_NVS", "Entradas utilizadas: %zu", stats.used_entries);
+  ESP_LOGI("SELFIQ_NVS", "Entradas libres: %zu", stats.free_entries);
+  ESP_LOGI("SELFIQ_NVS", "Namespaces: %zu", stats.namespace_count);
+  ESP_LOGI("SELFIQ_NVS", "=====================================");
+}
