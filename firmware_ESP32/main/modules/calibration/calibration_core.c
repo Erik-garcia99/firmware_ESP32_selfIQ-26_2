@@ -102,6 +102,57 @@ static bool descriptor_valid(const cal_descriptor_t *d) {
          d->cell_count == (uint16_t)(d->grid_side * d->grid_side);
 }
 
+/* Inserción sobre un arreglo pequeño (<= CAL_DESCRIPTOR_MEDIAN_MAX). */
+static uint8_t median_byte(uint8_t *values, size_t count) {
+  for (size_t i = 1; i < count; ++i) {
+    const uint8_t value = values[i];
+    size_t j = i;
+    while (j > 0 && values[j - 1U] > value) {
+      values[j] = values[j - 1U];
+      --j;
+    }
+    values[j] = value;
+  }
+  if (count % 2U) return values[count / 2U];
+  /* Par: media de los dos centrales, .5 hacia arriba. */
+  return (uint8_t)(((unsigned)values[count / 2U - 1U] +
+                    (unsigned)values[count / 2U] + 1U) / 2U);
+}
+
+cal_err_t cal_descriptor_median(const cal_descriptor_t *samples, size_t count,
+                                cal_descriptor_t *out) {
+  if (!samples || !out) return CAL_BAD_ARGUMENT;
+  if (count == 0U || count > CAL_DESCRIPTOR_MEDIAN_MAX) return CAL_BAD_ARGUMENT;
+  if (!descriptor_valid(&samples[0])) return CAL_BAD_GRID;
+  const uint8_t grid = samples[0].grid_side;
+  for (size_t i = 1; i < count; ++i)
+    if (!descriptor_valid(&samples[i]) || samples[i].grid_side != grid)
+      return CAL_BAD_GRID;
+
+  cal_descriptor_t next;
+  memset(&next, 0, sizeof next);
+  next.grid_side = grid;
+  next.cell_count = samples[0].cell_count;
+  uint32_t sum = 0;
+  uint8_t min_cell = UINT8_MAX, max_cell = 0;
+  uint8_t clipped[CAL_DESCRIPTOR_MEDIAN_MAX];
+  for (size_t s = 0; s < count; ++s) clipped[s] = samples[s].clipped_pct;
+  next.clipped_pct = median_byte(clipped, count);
+  for (uint16_t i = 0; i < next.cell_count; ++i) {
+    uint8_t column[CAL_DESCRIPTOR_MEDIAN_MAX];
+    for (size_t s = 0; s < count; ++s) column[s] = samples[s].cells[i];
+    const uint8_t value = median_byte(column, count);
+    next.cells[i] = value;
+    sum += value;
+    if (value < min_cell) min_cell = value;
+    if (value > max_cell) max_cell = value;
+  }
+  next.mean = (uint8_t)((sum + next.cell_count / 2U) / next.cell_count);
+  next.contrast = (uint8_t)(max_cell - min_cell);
+  *out = next;
+  return CAL_OK;
+}
+
 cal_err_t cal_descriptor_encode(const cal_descriptor_t *d,
                                 uint8_t *dst, size_t capacity,
                                 size_t *written) {

@@ -23,6 +23,11 @@ static int g_fail = 0, g_run = 0;
 #define ROI_W 599265U
 #define ROI_H 477941U
 
+static uint8_t median3(uint8_t a, uint8_t b, uint8_t c) {
+  if (a < b) return b < c ? b : (a < c ? c : a);
+  return a < c ? a : (b < c ? c : b);
+}
+
 static uint8_t g_frame[W * H];
 
 /* JPEG sintético mínimo: SOI + APP0 + SOF0(320x240) + SOS + datos + EOI.
@@ -246,12 +251,79 @@ static void check_base64(void) {
                           &written) == CAL_BUFFER_SMALL);
 }
 
+static void check_median_reference(void) {
+  const cal_roi_t roi = {ROI_X, ROI_Y, ROI_W, ROI_H};
+  cal_descriptor_t samples[3];
+  cal_capture_t capture;
+
+  /* Tres tomas del mismo frame base con brillo +0/+1/+2. */
+  for (unsigned s = 0; s < 3; ++s) {
+    fill_frame(0);
+    for (size_t i = 0; i < sizeof(g_frame); ++i)
+      g_frame[i] = (uint8_t)(g_frame[i] + s);
+    CHECK(cal_capture_build(g_frame, sizeof(g_frame), W, H, W, roi, &capture) ==
+          CAL_OK);
+    samples[s] = capture.descriptor;
+  }
+
+  cal_capture_t median;
+  CHECK(cal_capture_build_median(samples, 3, W, H, &median) == CAL_OK);
+  CHECK(median.descriptor_len == CAL_CAPTURE_DESCRIPTOR_BYTES);
+  CHECK(median.descriptor.grid_side == 8U && median.descriptor.cell_count == 64U);
+  CHECK(median.width == W && median.height == H);
+  CHECK(median.descriptor_crc == cal_descriptor_crc32(&median.descriptor));
+  CHECK(!memcmp(median.descriptor_bytes + CAL_DESCRIPTOR_HEADER_BYTES,
+                median.descriptor.cells, CAL_DESCRIPTOR_CELLS));
+  CHECK(median.image_bytes == 0U && median.image_sha256[0] == '\0');
+
+  /* Mediana por celda calculada aparte, sin usar la función bajo prueba. */
+  for (int i = 0; i < 64; ++i) {
+    const uint8_t expected =
+        median3(samples[0].cells[i], samples[1].cells[i], samples[2].cells[i]);
+    CHECK(median.descriptor.cells[i] == expected);
+  }
+
+  /* Orden de las muestras y repetición no cambian el resultado. */
+  cal_descriptor_t reversed[3] = {samples[2], samples[1], samples[0]};
+  cal_capture_t again;
+  CHECK(cal_capture_build_median(reversed, 3, W, H, &again) == CAL_OK);
+  CHECK(!memcmp(&again.descriptor, &median.descriptor, sizeof(median.descriptor)));
+  CHECK(again.descriptor_crc == median.descriptor_crc);
+
+  /* Una sola muestra: mismas celdas que esa toma. */
+  cal_capture_t single;
+  CHECK(cal_capture_build_median(samples, 1, W, H, &single) == CAL_OK);
+  CHECK(!memcmp(single.descriptor.cells, samples[0].cells, CAL_DESCRIPTOR_CELLS));
+  CHECK(single.descriptor_crc == cal_descriptor_crc32(&samples[0]));
+
+  /* Rechazos: cantidad, argumentos, dimensiones y grid mezclado. */
+  CHECK(cal_capture_build_median(samples, 0, W, H, &median) == CAL_BAD_ARGUMENT);
+  CHECK(cal_capture_build_median(samples, CAL_DESCRIPTOR_MEDIAN_MAX + 1U, W, H,
+                                 &median) == CAL_BAD_ARGUMENT);
+  CHECK(cal_capture_build_median(NULL, 3, W, H, &median) == CAL_BAD_ARGUMENT);
+  CHECK(cal_capture_build_median(samples, 3, W, H, NULL) == CAL_BAD_ARGUMENT);
+  CHECK(cal_capture_build_median(samples, 3, 0U, H, &median) == CAL_BAD_FRAME);
+  CHECK(cal_capture_build_median(samples, 3, W, 65536U, &median) == CAL_BAD_FRAME);
+  cal_descriptor_t mixed[2] = {samples[0], samples[0]};
+  mixed[1].grid_side = 16;
+  mixed[1].cell_count = 256;
+  CHECK(cal_capture_build_median(mixed, 2, W, H, &median) == CAL_BAD_GRID);
+
+  /* El JPEG de revisión se adjunta igual que en la captura simple. */
+  uint8_t jpeg[256];
+  const size_t len = make_jpeg(jpeg, sizeof(jpeg), W, H);
+  CHECK(len > 0);
+  CHECK(cal_capture_attach_jpeg(&median, jpeg, len, W, H) == CAL_OK);
+  CHECK(median.image_bytes == len);
+}
+
 int main(void) {
   check_sha_vectors();
   check_jpeg_parser();
   check_descriptor_and_jpeg();
   check_rejections();
   check_base64();
+  check_median_reference();
   printf("calibration_capture: %d comprobaciones, %d fallos\n", g_run, g_fail);
   return g_fail ? 1 : 0;
 }

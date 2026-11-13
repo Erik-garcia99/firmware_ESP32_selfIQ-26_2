@@ -54,6 +54,15 @@ cal_err_t cal_capture_build(const uint8_t *gray, size_t length, uint32_t width,
                             uint32_t height, uint32_t stride, cal_roi_t roi,
                             cal_capture_t *out);
 
+/* Igual que cal_capture_build, pero a partir de N descriptores ya extraídos de
+ * frames del mismo tamaño/ROI (1..CAL_DESCRIPTOR_MEDIAN_MAX). Usa mediana por
+ * celda para reducir el ruido/instante de una sola toma. No captura frames ni
+ * toca la cámara: la tarea propietaria decide cuántos frames acumular. El
+ * formato persistido sigue siendo v1/8x8/66 B. */
+cal_err_t cal_capture_build_median(const cal_descriptor_t *samples, size_t count,
+                                   uint32_t width, uint32_t height,
+                                   cal_capture_t *out);
+
 /* Añade la identidad del JPEG de revisión: valida SOI/SOF/EOI, exige ancho y
  * alto esperados (y coherentes con el frame), y calcula SHA-256 de los bytes
  * exactos. El SHA cubre el JPEG completo, no el frame gris. */
