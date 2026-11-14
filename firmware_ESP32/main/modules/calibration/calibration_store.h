@@ -53,6 +53,9 @@ esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_i
                                    const char *empty_capture_id,
                                    const char *full_capture_id);
 esp_err_t calibration_store_get_active(const char *roi_id, cal_store_pair_t *out);
+/* RAM-only generation for camera cache coherence. Odd = commit in progress.
+ * Check before AND after loading/measuring. Not a persisted version number. */
+uint32_t calibration_store_revision(void);
 /* Cuerpo JSON para status, desde NVS validada; ausencias son null, errores no.
  * Un borrador parcial usa null para el CRC de la referencia aún inexistente. */
 esp_err_t calibration_store_status_body(const char *roi_id, char *out, size_t size);

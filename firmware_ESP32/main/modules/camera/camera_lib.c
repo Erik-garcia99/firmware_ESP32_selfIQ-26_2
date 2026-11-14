@@ -17,6 +17,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "global.h"
+#include "modules/vision/vision_trial.h"
+#include "modules/vision/vision_pilot.h"
 
 static const char *TAG = "SELFIQ_CAMERA";
 static bool camera_ready = false;
@@ -729,6 +731,8 @@ static void camera_task(void *arg)
 
         if (has_calibration) {
             camera_handle_calibration(&cal_request);
+        } else if (vision_trial_service()) {
+            /* Experimental capture owns/releases every frame; no production data. */
         } else {
             int64_t started_us = esp_timer_get_time();
             camera_fb_t *frame = camera_capture();
@@ -739,6 +743,9 @@ static void camera_task(void *arg)
                 size_t bytes = frame->len;
                 bool valid = frame->buf != NULL && bytes > 0 &&
                              frame->format == PIXFORMAT_GRAYSCALE;
+                /* Read-only E3 pilot; frame remains owned by this task.
+                 * No extra capture/JPEG/HTTP/NVS write or roi_occ publication. */
+                vision_pilot_process_frame(frame);
                 if (valid) {
                     ++captured;
                     ++frames_in_window;
@@ -764,6 +771,7 @@ static void camera_task(void *arg)
                 }
                 camera_release(frame);
             } else {
+                vision_pilot_process_frame(NULL);
                 ++failed;
                 if (pending[0]) {
                     ESP_LOGE(TAG, "snapshot: captura invalida; solicitud descartada");
@@ -804,6 +812,7 @@ static void camera_task(void *arg)
                      (unsigned long)uptime_s, profile, (unsigned)frames_in_window,
                      (unsigned long)s_cal_frame_stats.accepted,
                      (unsigned long)cal_frame_rejected_total(&s_cal_frame_stats));
+            vision_pilot_health_log((uint32_t)uxTaskGetStackHighWaterMark(NULL));
             frames_in_window = 0;
         }
 
@@ -825,6 +834,8 @@ static void camera_task(void *arg)
 esp_err_t camera_start_task(void)
 {
     if (camera_task_handle != NULL) return ESP_OK;
+    esp_err_t trial_err = vision_trial_init();
+    if (trial_err != ESP_OK) return trial_err;
     if (!s_snapshot_queue) {
         s_snapshot_queue = xQueueCreate(CAMERA_SNAPSHOT_QUEUE_LEN, CAMERA_REQ_ID_SIZE);
         if (!s_snapshot_queue) return ESP_ERR_NO_MEM;

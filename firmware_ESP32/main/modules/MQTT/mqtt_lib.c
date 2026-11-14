@@ -30,6 +30,7 @@
 #include "modules/roi/roi_cmd.h"
 #include "modules/roi/roi_core.h"
 #include "modules/roi/roi_store.h"
+#include "modules/vision/vision_trial.h"
 
 
 static const char *TAG = "selfiq_mqtt";
@@ -236,6 +237,16 @@ esp_err_t mqtt_publish_ack_json(const char *payload) {
   if (!s_client || !s_mqtt_connected || !s_registered || !s_cmd_ack_topic[0])
     return ESP_ERR_INVALID_STATE;
   int id = esp_mqtt_client_publish(s_client, s_cmd_ack_topic, payload, 0, 1, 0);
+  return id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+esp_err_t mqtt_publish_trial_json(const char *payload) {
+  if (!payload || !*payload) return ESP_ERR_INVALID_ARG;
+  if (!s_client || !s_mqtt_connected || !s_registered) return ESP_ERR_INVALID_STATE;
+  char topic[MAX_TOPIC_LEN];
+  snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/experimental/result",
+           s_branch_id, s_esp_id, NODE_MODULE);
+  int id = esp_mqtt_client_enqueue(s_client, topic, payload, 0, 1, 0, true);
   return id < 0 ? ESP_FAIL : ESP_OK;
 }
 
@@ -695,6 +706,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
 
       if (cal_type(cmd_type)) {
         handle_cal_cmd(event->data, event->data_len);
+      } else if (!strcmp(cmd_type, "vision.experimental")) {
+        esp_err_t err = vision_trial_submit(root, event->retain);
+        if (err != ESP_OK)
+          ESP_LOGW(TAG, "vision.experimental rejected: %s", esp_err_to_name(err));
       } else if (!strcmp(cmd_type, "roi.set")) {
         handle_roi_set(root);
       } else if (!strcmp(cmd_type, "snapshot.request")) {

@@ -27,8 +27,13 @@ def main():
     budget = int(re.search(r'#define MQTT_CAL_TASK_STACK (\d+)U', header.read_text())[1])
     paths = {
         'status': ['cal_worker', 'calibration_store_status_body', 'get_active', 'load_blob', 'decode'],
-        'commit': ['cal_worker', 'calibration_store_commit', 'write_blob', 'load_blob', 'decode'],
+        'commit': ['cal_worker', 'calibration_store_commit', 'commit_pair', 'write_blob', 'load_blob', 'decode'],
         'cancel': ['cal_worker', 'calibration_store_cancel', 'load_blob', 'decode'],
+        'vision_measure': ['camera_task', 'vision_pilot_process_frame', 'pilot_process',
+                           'vr_measure', 'lp_measure'],
+        'vision_load': ['camera_task', 'vision_pilot_process_frame', 'pilot_process',
+                        'load', 'bound_now', 'current_binding',
+                        'calibration_store_get_active', 'get_active', 'load_blob', 'decode'],
     }
     # Missing/renamed/inlined symbols require review, not silent success.
     missing = sorted({name for path in paths.values() for name in path} - frames.keys())
@@ -37,10 +42,14 @@ def main():
     if frames['cal_worker'] > 512:
         raise SystemExit(f"cal_worker local frame grew to {frames['cal_worker']} B (limit 512)")
     reserve = 2048  # Allowance, not a measured upper bound on library calls.
+    camera_header = header.parents[1] / 'camera/camera_lib.h'
+    camera_budget = int(re.search(r'#define CAMERA_TASK_STACK_BYTES (\d+)U',
+                                 camera_header.read_text())[1])
     for action, path in paths.items():
         known = sum(frames[name] for name in path)
-        print(f'{action}: known frames={known} B, library allowance={reserve} B, budget={budget} B')
-        if known + reserve > budget:
+        task_budget = camera_budget if action.startswith('vision_') else budget
+        print(f'{action}: known frames={known} B, library allowance={reserve} B, budget={task_budget} B')
+        if known + reserve > task_budget:
             raise SystemExit(f'Insufficient stack allowance for {action}')
     print(f"cal_worker frame={frames['cal_worker']} B; check PASSED; verify stack_min_free on board")
 

@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "nvs.h"
 #include "esp_log.h"
@@ -10,6 +11,12 @@
 #include "modules/roi/roi_core.h"
 
 static const char *TAG = "SELFIQ_CAL_STORE";
+static atomic_uint_least32_t s_active_revision;
+static atomic_flag s_commit_busy = ATOMIC_FLAG_INIT;
+
+uint32_t calibration_store_revision(void) {
+    return atomic_load_explicit(&s_active_revision, memory_order_acquire);
+}
 
 /* Formato binario fijo, sin structs con padding. Cada banco es autocontenido.
  * (magic, version, flags, IDs, hash, versiones, capturas, descriptores, CRC).
@@ -59,10 +66,10 @@ static bool hash_ok(const char *hash) {
     return true;
 }
 static bool roi_matches(const char *roi_id, uint32_t version) {
-    const roi_blob_t *current = roi_store_current();
-    if (!current || current->config_version != version) return false;
-    for (size_t i = 0; i < current->count; ++i)
-        if (!strcmp(current->rois[i].id, roi_id)) return true;
+    roi_blob_t current;
+    if (!roi_store_snapshot(&current) || current.config_version != version) return false;
+    for (size_t i = 0; i < current.count; ++i)
+        if (!strcmp(current.rois[i].id, roi_id)) return true;
     return false;
 }
 static bool descriptor_ok(const uint8_t *src) {
@@ -312,7 +319,7 @@ esp_err_t calibration_store_save_draft(const cal_store_reference_t *ref) {
     return err;
 }
 
-esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_id,
+static esp_err_t commit_pair(const char *roi_id, const char *calibration_id,
                                    const char *empty_capture_id,
                                    const char *full_capture_id) {
     if (!uuid_ok(roi_id) || !uuid_ok(calibration_id) ||
@@ -392,6 +399,20 @@ esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_i
     }
     if (err == ESP_OK) ESP_LOGI(TAG, "Pareja activada version=%lu banco=%u",
                               (unsigned long)pair.calibration_version, (unsigned)next);
+    return err;
+}
+
+esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_id,
+                                   const char *empty_capture_id,
+                                   const char *full_capture_id) {
+    if (atomic_flag_test_and_set_explicit(&s_commit_busy, memory_order_acquire))
+        return ESP_ERR_INVALID_STATE;
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_acq_rel);
+    esp_err_t err = commit_pair(roi_id, calibration_id, empty_capture_id, full_capture_id);
+    /* Even on error the active selector may have changed before readback
+     * failed: consumers must reload instead of trusting their old cache. */
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_release);
+    atomic_flag_clear_explicit(&s_commit_busy, memory_order_release);
     return err;
 }
 

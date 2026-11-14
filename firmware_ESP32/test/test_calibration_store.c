@@ -13,6 +13,7 @@
 
 static roi_blob_t configured;
 const roi_blob_t *roi_store_current(void) {return &configured;}
+bool roi_store_snapshot(roi_blob_t *out) {*out = configured; return true;}
 bool roi_uuid_valid(const char *p) {
     if (!p || strlen(p) != 36) return false;
     for (unsigned i=0;i<36;i++) {
@@ -55,6 +56,11 @@ esp_err_t nvs_get_u8(nvs_handle_t h,const char *key,uint8_t *v){
     *v=e->buf[0];return ESP_OK;
 }
 esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t v){
+    uint32_t revision = calibration_store_revision();
+    assert(revision & 1U);
+    assert(calibration_store_commit("invalid", "invalid", "invalid", "invalid") ==
+           ESP_ERR_INVALID_STATE); /* reentrant writer is rejected before NVS */
+    assert(calibration_store_revision() == revision);
     (void)h;snprintf(pending_selector,sizeof(pending_selector),"%s",key);
     pending_selector_value=v;has_pending_selector=true;return ESP_OK;
 }
@@ -129,10 +135,15 @@ int main(void){
     report_status(); /* full_crc=null, no CRC inventado */
     assert(save(CAL2,F2,CAL_STORE_FULL,170,2)==ESP_ERR_INVALID_STATE);
     assert(save(CAL2,E2,CAL_STORE_EMPTY,20,1)==ESP_ERR_INVALID_STATE);
+    uint32_t revision_before = calibration_store_revision();
+    assert(!(revision_before & 1U));
     assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_ERR_INVALID_STATE);
+    assert(calibration_store_revision() == revision_before + 2U);
     assert(save(CAL1,F1,CAL_STORE_FULL,150,1)==ESP_OK);
     report_status();
+    revision_before = calibration_store_revision();
     assert(calibration_store_commit(ROI,CAL1,E1,F1)==ESP_OK);
+    assert(calibration_store_revision() == revision_before + 2U);
     assert(calibration_store_init()==ESP_OK); /* reinicio logico */
     assert(calibration_store_get_active(ROI,&p)==ESP_OK && p.calibration_version==1);
     report_status();
@@ -145,7 +156,9 @@ int main(void){
     assert(save(CAL1,E1,CAL_STORE_EMPTY,10,1)==ESP_ERR_INVALID_STATE);
     assert(save(CAL2,F2,CAL_STORE_FULL,170,2)==ESP_OK);
     fail_selector_commit=1;
+    revision_before = calibration_store_revision();
     assert(calibration_store_commit(ROI,CAL2,E2,F2)==ESP_FAIL);
+    assert(calibration_store_revision() == revision_before + 2U);
     assert(calibration_store_get_active(ROI,&p)==ESP_OK && p.calibration_version==1);
     assert(calibration_store_commit(ROI,CAL2,E2,F2)==ESP_OK);
     assert(calibration_store_init()==ESP_OK);
