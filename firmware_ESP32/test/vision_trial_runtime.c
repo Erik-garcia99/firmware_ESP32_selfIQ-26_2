@@ -26,6 +26,23 @@ static uint32_t active_revision;
 static unsigned binding_reads, storage_opens, revision_after_snapshot;
 static float roi_shift;
 static bool snapshot_failed;
+static unsigned roi_publications;
+static bool queue_full;
+static bool production_fixture;
+static uint32_t fixture_version;
+static unsigned kernel_reads;
+esp_err_t mqtt_queue_json(const char *type, const char *data) {
+    assert(!strcmp(type, "roi_occ"));
+    cJSON *root = cJSON_Parse(data);
+    assert(root);
+    assert(cJSON_GetObjectItemCaseSensitive(root, "roi_id"));
+    assert(cJSON_GetObjectItemCaseSensitive(root, "value")->valueint <= 100);
+    assert(cJSON_GetObjectItemCaseSensitive(root, "captured_uptime_ms"));
+    cJSON_Delete(root);
+    if (queue_full) return ESP_ERR_NO_MEM;
+    ++roi_publications;
+    return ESP_OK;
+}
 uint32_t calibration_store_revision(void) { return active_revision; }
 static int mock_get_reg(sensor_t *sensor, int reg, int mask) {
     (void)sensor;
@@ -90,7 +107,38 @@ bool roi_store_snapshot(roi_blob_t *out) {
         out->rois[1].x = .01f; out->rois[1].y = .01f;
         out->rois[1].w = .1f; out->rois[1].h = .1f;
     }
+    roi_blob_seal(out); /* el snapshot del dispositivo siempre viene sellado */
     return true;
+}
+esp_err_t calibration_store_get_kernel_ref(cal_kernel_ref_t *ref) {
+    ++kernel_reads;
+    if (!production_fixture) return ESP_ERR_NVS_NOT_FOUND;
+    if (ref->calibration_version != fixture_version) return ESP_ERR_INVALID_STATE;
+    lp_context_t pat;
+    lg_context_t grd;
+    bool second = strcmp(ref->roi_id, active.roi_id) != 0;
+    if (lp_init(&pat, 640, 480, second ? 6 : 160, second ? 4 : 120,
+                second ? 65 : 320, second ? 49 : 240) != LP_OK) abort();
+    if (lg_init(&grd, 640, 480, pat.x, pat.y, pat.w, pat.h)) abort();
+    size_t bytes = 16U * (pat.count + grd.count);
+    if (ref->tiles) {
+        assert(ref->tiles_capacity >= bytes);
+        /* References from the deterministic empty test image. */
+        assert(lp_add_empty(&pat, pixels, sizeof(pixels), 640) == LP_OK);
+        assert(lp_finish_empty(&pat) == LP_OK);
+        assert(!lg_add(&grd, pixels, sizeof(pixels), 640));
+        assert(!lg_finish(&grd));
+        size_t at = 0;
+        for (unsigned i = 0; i < pat.count; ++i)
+            for (unsigned k = 0; k < 16; ++k) ref->tiles[at++] = pat.reference[i][k];
+        for (unsigned i = 0; i < grd.count; ++i)
+            for (unsigned k = 0; k < 16; ++k) ref->tiles[at++] = grd.ref[i][k];
+    }
+    ref->rect[0] = pat.x; ref->rect[1] = pat.y;
+    ref->rect[2] = pat.w; ref->rect[3] = pat.h;
+    ref->tile_count = pat.count; ref->guard_count = grd.count;
+    ref->tiles_bytes = bytes; ref->full_pixels = pat.w * pat.h / 2;
+    return ESP_OK;
 }
 esp_err_t calibration_store_get_active(const char *roi, cal_store_pair_t *out) {
     ++binding_reads;
@@ -102,6 +150,19 @@ esp_err_t calibration_store_get_active(const char *roi, cal_store_pair_t *out) {
     }
     if (strcmp(roi, active.roi_id)) return ESP_FAIL;
     *out = active; return ESP_OK;
+}
+static unsigned wipe_calls;
+esp_err_t calibration_store_erase_all(cal_store_erase_report_t *report) {
+    ++wipe_calls;
+    if (!report) return ESP_OK;
+    memset(report, 0, sizeof(*report));
+    report->keys_removed = 7;
+    report->free_entries_before = 196;
+    report->available_entries_before = 70;
+    report->free_entries_after = 400;
+    report->available_entries_after = 274;
+    report->verified_empty = true;
+    return ESP_OK;
 }
 int nvs_open(const char *name, int mode, nvs_handle_t *out) {
     ++storage_opens;
@@ -198,6 +259,19 @@ esp_err_t mqtt_publish_trial_json(const char *text) {
         assert(cJSON_IsTrue(cJSON_GetObjectItem(root, "removed")) ==
                !strcmp(last_status, "cleanup_completed"));
     }
+    const cJSON *wipe_scope = cJSON_GetObjectItem(root, "wipe_scope");
+    if (wipe_scope) {
+        assert(!strcmp(wipe_scope->valuestring,
+                       "selfiq_cal,selfiq_vexp/reference"));
+        assert(!strcmp(cJSON_GetObjectItem(root, "wipe_policy")->valuestring,
+                       "all_calibration_keys"));
+        assert(cJSON_GetObjectItem(root, "cal_keys_removed")->valueint == 7);
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(root, "cal_verified_empty")));
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(root, "trial_removed")));
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(root, "roi_blob_ok")));
+        assert(cJSON_GetObjectItem(root, "nvs_available_entries_before")->valueint == 70);
+        assert(cJSON_GetObjectItem(root, "nvs_available_entries")->valueint == 300);
+    }
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "valid"))) {
         assert(stage == 2);
         assert(cJSON_IsNumber(cJSON_GetObjectItem(root, "occupancy_pct")));
@@ -213,6 +287,12 @@ static void image(bool full, bool changed_background) {
                 changed_background) v = 160 - v;
             pixels[y * 640 + x] = v;
         }
+}
+static void flatten_guard(const lg_context_t *g, uint32_t limit) {
+    for (uint32_t i = 0; i < limit && i < g->count; ++i)
+        for (unsigned y = 0; y < 16; ++y)
+            for (unsigned x = 0; x < 16; ++x)
+                pixels[(size_t)(g->y[i] + y) * 640 + g->x[i] + x] = 80;
 }
 static void submit(unsigned id, unsigned session, const char *action, bool retained) {
     snprintf(last_command, sizeof(last_command),
@@ -230,7 +310,30 @@ static void submit(unsigned id, unsigned session, const char *action, bool retai
     if (!retained) assert(vision_trial_service());
     assert(frames == released);
 }
+/* El borrado total exige el literal exacto: no se acepta un booleano. */
+static void submit_wipe(unsigned id, unsigned session, bool confirm) {
+    snprintf(last_command, sizeof(last_command),
+        "{\"confirm_experimental\":true,%s"
+        "\"req_id\":\"00000000-0000-0000-0000-%012u\","
+        "\"session_id\":\"10000000-0000-0000-0000-%012u\","
+        "\"roi_id\":\"20000000-0000-0000-0000-000000000001\","
+        "\"action\":\"wipe_calibration\"}",
+        confirm ? "\"confirm_wipe_cal\":\"ERASE_CAL\"," : "", id, session);
+    cJSON *root = cJSON_Parse(last_command);
+    assert(root);
+    esp_err_t err = vision_trial_submit(root, false);
+    cJSON_Delete(root);
+    if (!confirm) { assert(err != ESP_OK); return; }
+    assert(err == ESP_OK);
+    assert(vision_trial_service());
+}
 static void reboot_ram(void) {
+    for (unsigned i = 0; i < production_count; ++i) {
+        free(prod_pattern[i]); prod_pattern[i] = NULL;
+        free(prod_guard[i]); prod_guard[i] = NULL;
+    }
+    production_count = production_index = 0;
+    using_production = false;
     free(pattern); free(guard); pattern = NULL; guard = NULL;
     stage = 0; attempted_load = false; memset(&header, 0, sizeof(header));
     memset(seen_req, 0, sizeof(seen_req)); seen_next = 0;
@@ -273,6 +376,19 @@ static void test_frame_evaluator(void) {
     image(false, false);
     assert(vr_measure(p, g, full.occupied_pixels, &f, &result) == VR_OK);
     assert(result.value.relative_pct == 0);
+    /* Bandas 15/11/2026: la guarda parcialmente alterada mide y avisa; casi
+     * toda alterada cae bajo el 25 % y se rechaza. El ROI no se toca. */
+    flatten_guard(g, g->count / 2);
+    assert(vr_measure(p, g, full.occupied_pixels, &f, &result) == VR_OK);
+    assert(result.guard_warn == 1 && result.value.relative_pct == 0);
+    assert(result.matched * 100U < result.informative * LG_GUARD_PASS_PCT);
+    image(false, false);
+    flatten_guard(g, g->count - g->count / 5);
+    assert(vr_measure(p, g, full.occupied_pixels, &f, &result) == VR_BACKGROUND);
+    assert(result.value.relative_pct == 255);
+    image(false, false);
+    assert(vr_measure(p, g, full.occupied_pixels, &f, &result) == VR_OK);
+    assert(result.guard_warn == 0);
     f.length--;
     assert(vr_measure(p, g, full.occupied_pixels, &f, &result) == VR_FRAME);
     assert(result.value.relative_pct == 255);
@@ -574,6 +690,12 @@ int main(void) {
     image(false, false);
     automatic_frame();
     assert(pilot_health.valid && pilot_health.occupancy_pct == 0);
+    /* Banda de aviso en el piloto: mide, cuenta guard_warn y no rechaza. */
+    unsigned guard_warns_before = pilot_health.guard_warn;
+    flatten_guard(guard, guard->count / 2);
+    automatic_frame();
+    assert(pilot_health.valid && pilot_health.occupancy_pct == 0);
+    assert(pilot_health.guard_warn == guard_warns_before + 1);
     image(false, true);
     automatic_frame();
     assert(!pilot_health.valid && pilot_health.background_rejected == 1);
@@ -603,7 +725,10 @@ int main(void) {
     snapshot_failed = false;
     ++active.calibration_version; active_revision += 2;
     automatic_frame();
-    assert(!pilot_health.valid && !strcmp(pilot_health.status, "context_changed"));
+    /* Reload discards the old slot; new active version has no matching kernel.
+     * Geometry mismatches above still report context_changed without reloading. */
+    assert(!pilot_health.valid && !strcmp(pilot_health.status, "references_required"));
+    assert(pilot_health.occupancy_pct == 255);
     --active.calibration_version; active_revision += 2;
     automatic_frame();
     assert(pilot_health.valid);
@@ -616,6 +741,74 @@ int main(void) {
     vision_pilot_health(&health);
     assert(health.frames == health.accepted + health.rejected);
     vision_pilot_health_log(4096);
+    /* Mantenimiento: borrado total de calibracion en una sola accion. */
+    image(false, false);
+    submit(90, 11, "empty", false);
+    assert(stage == 1);
+    image(true, false);
+    submit(91, 11, "full", false);
+    assert(stage == 2 && persisted_size);
+    unsigned erases_before_wipe = erases, opens_before_wipe = storage_opens;
+    submit_wipe(300, 12, false);           /* sin el literal: rechazado */
+    assert(wipe_calls == 0 && erases == erases_before_wipe && stage == 2);
+    submit_wipe(301, 12, true);
+    assert(wipe_calls == 1);
+    assert(!strcmp(last_status, "wipe_completed"));
+    assert(erases == erases_before_wipe + 1 && !persisted_size);
+    assert(stage == 0 && pattern == NULL && guard == NULL);
+    submit(302, 12, "status", false);
+    assert(!strcmp(last_status, "uncalibrated"));
+    /* No se relee el blob borrado ni se mide sin recalibrar. */
+    submit(303, 12, "sample", false);
+    assert(!strcmp(last_status, "calibration_required"));
+    assert(storage_opens == opens_before_wipe + 1);
+    reboot_ram();
+    /* Production: two ROI, cached references, throttled telemetry and no
+     * publishing on rejects. The preceding experimental run publishes nothing. */
+    assert(roi_publications == 0);
+    production_fixture = true;
+    fixture_version = active.calibration_version;
+    extra_roi = true;
+    image(false, false);
+    automatic_frame();
+    assert(using_production && production_count == 2 && pilot_health.valid);
+    assert(roi_publications == 1);
+    unsigned kernel_after_load = kernel_reads;
+    automatic_frame();
+    assert(pilot_health.valid && roi_publications == 2);
+    automatic_frame();
+    assert(kernel_reads == kernel_after_load && roi_publications == 2);
+    assert(production_index == 1);
+    clock_us += PROD_PUBLISH_US;
+    queue_full = true;
+    automatic_frame();
+    assert(roi_publications == 2 && production_queue_rejected);
+    queue_full = false;
+    automatic_frame();
+    assert(roi_publications == 3);
+    clock_us += PROD_PUBLISH_US;
+    stale = true;
+    automatic_frame();
+    assert(!pilot_health.valid && roi_publications == 3);
+    stale = false;
+    /* Invalid first ROI must not block the second slot. */
+    roi_shift = .01f;
+    automatic_frame();
+    assert(!pilot_health.valid);
+    automatic_frame();
+    assert(pilot_health.valid);
+    roi_shift = 0;
+    unsigned before_revision = roi_publications;
+    ++active.calibration_version; active_revision += 2;
+    automatic_frame();
+    assert(!using_production && !pilot_health.valid);
+    assert(roi_publications == before_revision);
+    --active.calibration_version; active_revision += 2;
+    automatic_frame();
+    assert(using_production && pilot_health.valid);
+    assert(roi_publications == before_revision + 1);
+    production_fixture = false;
+    extra_roi = false;
     reboot_ram();
     puts("vision_trial: runtime, safe cleanup/discard, CRC, context, no-space recovery and release OK");
     return 0;

@@ -69,11 +69,23 @@ int lg_finish(lg_context_t *c) {
     c->ready = 1;
     return 0;
 }
-int lg_check(const lg_context_t *c, const uint8_t *p, size_t n, uint32_t stride,
-             uint32_t *matched, uint32_t *informative) {
-    if (!matched || !informative) return 1;
+lg_verdict_t lg_guard_band(uint32_t matched, uint32_t informative) {
+    /* informative < 16 equivale a no tener evidencia espacial suficiente. */
+    if (informative < 16) return LG_GUARD_REJECT;
+    if (matched * 100U < informative * LG_GUARD_REJECT_PCT) return LG_GUARD_REJECT;
+    if (matched * 100U < informative * LG_GUARD_PASS_PCT) return LG_GUARD_WARN;
+    return LG_GUARD_PASS;
+}
+const char *lg_verdict_name(lg_verdict_t verdict) {
+    return verdict == LG_GUARD_PASS ? "pass" :
+           verdict == LG_GUARD_WARN ? "warn" : "reject";
+}
+lg_verdict_t lg_guard_verdict(const lg_context_t *c, const uint8_t *p, size_t n,
+                              uint32_t stride, uint32_t *matched,
+                              uint32_t *informative) {
+    if (!matched || !informative) return LG_GUARD_REJECT;
     *matched = 0; *informative = 0;
-    if (!valid(c, p, n, stride) || !c->ready) return 1;
+    if (!valid(c, p, n, stride) || !c->ready) return LG_GUARD_REJECT;
     for (uint32_t i = 0; i < c->count; ++i) {
         uint16_t f[16];
         features(c, p, stride, i, f);
@@ -93,5 +105,5 @@ int lg_check(const lg_context_t *c, const uint8_t *p, size_t n, uint32_t stride,
         if (residual <= 1280 || (cov > 0 && cov * cov * 100 >= va * vb * 9))
             ++*matched;
     }
-    return *informative < 16 || *matched * 100 < *informative * 60;
+    return lg_guard_band(*matched, *informative);
 }

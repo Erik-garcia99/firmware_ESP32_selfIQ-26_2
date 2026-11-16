@@ -23,7 +23,7 @@ bool roi_uuid_valid(const char *p) {
     return true;
 }
 #define MAX_KEYS 50
-#define MAX_PAYLOAD 512
+#define MAX_PAYLOAD 6144
 typedef struct {char key[16]; unsigned char buf[MAX_PAYLOAD]; size_t len; bool occupied;} entry_t;
 static entry_t entries[MAX_KEYS];
 static int fail_selector_commit;
@@ -42,6 +42,7 @@ esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){(void)ns;(void)mode;
 void nvs_close(nvs_handle_t h){(void)h;}
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *data,size_t *len){
     (void)h;entry_t *e=entry(key,false);if(!e)return ESP_ERR_NVS_NOT_FOUND;
+    if(!data){*len=e->len;return ESP_OK;} /* igual que ESP-IDF: solo longitud */
     if(*len<e->len)return ESP_ERR_INVALID_SIZE;
     memcpy(data,e->buf,e->len);*len=e->len;return ESP_OK;
 }
@@ -76,6 +77,62 @@ esp_err_t nvs_commit(nvs_handle_t h){
 esp_err_t nvs_erase_key(nvs_handle_t h,const char *key){
     (void)h;entry_t *e=entry(key,false);if(!e)return ESP_ERR_NVS_NOT_FOUND;
     e->occupied=false;return ESP_OK;
+}
+/* Enumeracion y estadisticas: lo justo para ejercitar el borrado total sin
+ * depender de ESP-IDF. Todas las claves del banco de pruebas son de selfiq_cal. */
+#define MAX_ITER 4
+struct nvs_opaque_iterator_t {int index;};
+static struct nvs_opaque_iterator_t iterators[MAX_ITER];
+static bool iterator_used[MAX_ITER];
+esp_err_t nvs_entry_find(const char *part,const char *ns,nvs_type_t type,
+                         nvs_iterator_t *out){
+    /* ESP-IDF real rechaza part_name NULL con ESP_ERR_INVALID_ARG. */
+    if(!part||!out)return ESP_ERR_INVALID_ARG;
+    (void)ns;(void)type;
+    *out=NULL;
+    for(int slot=0;slot<MAX_ITER;slot++){
+        if(iterator_used[slot])continue;
+        for(int i=0;i<MAX_KEYS;i++){
+            if(!entries[i].occupied)continue;
+            iterator_used[slot]=true;iterators[slot].index=i;
+            *out=&iterators[slot];return ESP_OK;
+        }
+        break;
+    }
+    return ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t nvs_entry_next(nvs_iterator_t *it){
+    if(!it||!*it)return ESP_ERR_INVALID_ARG;
+    for(int i=(*it)->index+1;i<MAX_KEYS;i++){
+        if(!entries[i].occupied)continue;
+        (*it)->index=i;return ESP_OK;
+    }
+    return ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t nvs_entry_info(const nvs_iterator_t it,nvs_entry_info_t *info){
+    if(!it||!info)return ESP_ERR_INVALID_ARG;
+    if(it->index<0||it->index>=MAX_KEYS||!entries[it->index].occupied)
+        return ESP_ERR_NVS_NOT_FOUND;
+    memset(info,0,sizeof(*info));
+    snprintf(info->key,sizeof(info->key),"%s",entries[it->index].key);
+    return ESP_OK;
+}
+void nvs_release_iterator(nvs_iterator_t it){
+    if(!it)return;
+    for(int slot=0;slot<MAX_ITER;slot++)
+        if(&iterators[slot]==it)iterator_used[slot]=false;
+}
+esp_err_t nvs_get_stats(const char *part,nvs_stats_t *stats){
+    (void)part;if(!stats)return ESP_ERR_INVALID_ARG;
+    size_t used=0;
+    for(int i=0;i<MAX_KEYS;i++)
+        if(entries[i].occupied)used+=1+(entries[i].len+31)/32;
+    memset(stats,0,sizeof(*stats));
+    stats->used_entries=used;stats->total_entries=756;
+    stats->free_entries=used<756?756-used:0;
+    stats->available_entries=stats->free_entries>126?stats->free_entries-126:0;
+    stats->namespace_count=3;
+    return ESP_OK;
 }
 static const char *ROI="06c87f97-8fad-4684-b80e-1f179dc3b570";
 static const char *CAL1="11111111-1111-4111-8111-111111111111";
@@ -186,6 +243,142 @@ int main(void){
     assert(calibration_store_get_active(ROI,&p)==ESP_ERR_INVALID_STATE);
     assert(calibration_store_status_body(ROI,body,sizeof(body))==ESP_OK);
     assert(calibration_store_cancel(ROI,CAL1)==ESP_OK); /* limpiar borrador obsoleto */
+    /* Referencia local del kernel, una por ROI: formato, version y caducidad. */
+    {
+        const uint32_t CFG = 8U, CV = 3U;
+        uint8_t tiles[CAL_KERNEL_TILE_BYTES * 40U];
+        for (size_t i = 0; i < sizeof(tiles); ++i) tiles[i] = (uint8_t)(i * 7U + 1U);
+        cal_kernel_ref_t ref;
+        memset(&ref, 0, sizeof(ref));
+        memcpy(ref.roi_id, ROI, 37);
+        ref.config_version = CFG;
+        ref.calibration_version = CV;
+        ref.rect[0] = 10U; ref.rect[1] = 20U; ref.rect[2] = 160U; ref.rect[3] = 120U;
+        ref.tile_count = 32U;
+        ref.guard_count = 8U;
+        ref.tiles = tiles;
+        ref.tiles_bytes = sizeof(tiles);
+
+        cal_kernel_ref_t probe;
+        uint8_t readback[CAL_KERNEL_TILE_BYTES * 40U];
+#define KERNEL_PROBE()                                                        \
+        do {                                                                  \
+            memset(&probe, 0, sizeof(probe));                                 \
+            memcpy(probe.roi_id, ROI, 37);                                    \
+            probe.config_version = CFG;                                       \
+            probe.calibration_version = CV;                                   \
+        } while (0)
+
+        /* Sin guardar todavia: ausencia declarada, nunca exito vacio. */
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_ERR_NVS_NOT_FOUND);
+
+        /* Argumentos incoherentes y configuracion no aplicada. */
+        ref.tiles_bytes = 10U;
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_ERR_INVALID_ARG);
+        ref.tiles_bytes = sizeof(tiles);
+        ref.tile_count = 0U;
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_ERR_INVALID_ARG);
+        ref.tile_count = 32U;
+        ref.full_pixels = 160U * 120U + 1U;
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_ERR_INVALID_ARG);
+        ref.full_pixels = 0U;
+        ref.config_version = 7U; /* la configuracion aplicada es la 8 */
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_ERR_INVALID_STATE);
+        ref.config_version = CFG;
+
+        /* Guardado: primero la referencia de vacio, sin lleno aun. */
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_OK);
+
+        /* Lectura de metadatos sin pedir tiles. */
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_OK);
+        assert(probe.tiles == NULL && probe.tiles_bytes == sizeof(tiles));
+        assert(probe.tile_count == 32U && probe.guard_count == 8U);
+        assert(probe.rect[0] == 10U && probe.rect[3] == 120U);
+        assert(probe.full_pixels == 0U);
+        assert(!strcmp(probe.roi_id, ROI));
+
+        /* Destino pequeno no se acepta a medias. */
+        probe.tiles = readback;
+        probe.tiles_capacity = 8U;
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_ERR_INVALID_SIZE);
+        probe.tiles_capacity = sizeof(readback);
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_OK);
+        assert(!memcmp(readback, tiles, sizeof(tiles)));
+
+        /* Recalibrar invalida sin borrar: la version manda. */
+        probe.calibration_version = CV + 1U;
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_ERR_INVALID_STATE);
+        probe.calibration_version = CV;
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_OK);
+
+        /* Lleno tardio: lectura-modificacion-escritura sobre el mismo blob. */
+        assert(calibration_store_set_kernel_full_pixels(ROI, CFG, CV, 0U) == ESP_ERR_INVALID_ARG);
+        assert(calibration_store_set_kernel_full_pixels(ROI, CFG, CV + 1U, 9000U) == ESP_ERR_INVALID_STATE);
+        assert(calibration_store_set_kernel_full_pixels(ROI, CFG, CV, 160U * 120U + 1U) == ESP_ERR_INVALID_ARG);
+        assert(calibration_store_set_kernel_full_pixels(ROI, CFG, CV, 9000U) == ESP_OK);
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_OK);
+        assert(probe.full_pixels == 9000U);
+        assert(probe.tiles_bytes == sizeof(tiles)); /* los tiles sobreviven */
+
+        /* Reescribir el mismo ROI no crea claves nuevas ni pierde datos. */
+        unsigned kernel_keys = 0;
+        for (int i = 0; i < MAX_KEYS; ++i)
+            if (entries[i].occupied && entries[i].key[0] == 'k') ++kernel_keys;
+        assert(kernel_keys == 1U);
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_OK);
+        kernel_keys = 0;
+        for (int i = 0; i < MAX_KEYS; ++i)
+            if (entries[i].occupied && entries[i].key[0] == 'k') ++kernel_keys;
+        assert(kernel_keys == 1U);
+
+        /* Un byte alterado invalida el blob; se reescribe sin intervencion. */
+        for (int i = 0; i < MAX_KEYS; ++i)
+            if (entries[i].occupied && entries[i].key[0] == 'k')
+                entries[i].buf[100] ^= 0xFFU;
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_ERR_INVALID_CRC);
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_OK);
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_OK);
+
+        /* Borrado independiente de la pareja, e idempotente. */
+        assert(calibration_store_drop_kernel_ref(ROI) == ESP_OK);
+        assert(calibration_store_drop_kernel_ref(ROI) == ESP_OK);
+        KERNEL_PROBE();
+        assert(calibration_store_get_kernel_ref(&probe) == ESP_ERR_NVS_NOT_FOUND);
+        bool pair_alive = false;
+        for (int i = 0; i < MAX_KEYS; ++i)
+            if (entries[i].occupied && (entries[i].key[0] == 'a' || entries[i].key[0] == 'b'))
+                pair_alive = true;
+        assert(pair_alive); /* borrar el kernel no toca la pareja de calibracion */
+        /* Dejar una referencia viva para comprobar el borrado total. */
+        assert(calibration_store_save_kernel_ref(&ref) == ESP_OK);
+#undef KERNEL_PROBE
+    }
+    /* Mantenimiento: borrado total de selfiq_cal. */
+    unsigned keys_before = 0;
+    for (int i=0;i<MAX_KEYS;i++) if (entries[i].occupied) keys_before++;
+    assert(keys_before > 0);
+    cal_store_erase_report_t report;
+    assert(calibration_store_erase_all(&report) == ESP_OK);
+    assert(report.keys_removed == keys_before);
+    assert(report.verified_empty);
+    assert(report.available_entries_after >= report.available_entries_before);
+    for (int i=0;i<MAX_KEYS;i++) assert(!entries[i].occupied);
+    /* Repetir no es error: no quedan claves y se informa el estado real. */
+    assert(calibration_store_erase_all(&report) == ESP_OK);
+    assert(report.keys_removed == 0 && report.verified_empty);
+    /* Sin pareja: "sin datos", nunca corrupcion ni porcentajes inventados. */
+    assert(calibration_store_get_active(ROI,&p) == ESP_ERR_NVS_NOT_FOUND);
+    assert(calibration_store_get_draft(ROI,&p) == ESP_ERR_NVS_NOT_FOUND);
+    assert(calibration_store_status_body(ROI,body,sizeof(body)) == ESP_OK);
+    assert(!strcmp(body,"\"active\":null,\"draft\":null"));
+    /* La geometria aplicada (otro namespace) sigue intacta. */
+    assert(roi_store_snapshot(&configured) && configured.count == 1);
+    puts("PASS: borrado total de calibracion, idempotencia y ROI conservada");
     puts("PASS: borrador, pareja, reinicio logico, replay, cancel, fallo selector, version ROI");
     return 0;
 }

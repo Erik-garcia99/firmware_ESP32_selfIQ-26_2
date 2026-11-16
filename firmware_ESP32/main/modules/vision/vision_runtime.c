@@ -38,8 +38,12 @@ vr_status_t vr_measure(lp_context_t *pattern, const lg_context_t *guard,
         }
     if ((uint64_t)clipped * 100 > (uint64_t)pattern->w * pattern->h * 20)
         return out->status = VR_CLIPPING;
-    if (lg_check(guard, f->gray, f->length, VR_WIDTH, &out->matched, &out->informative))
+    lg_verdict_t guard_verdict =
+        lg_guard_verdict(guard, f->gray, f->length, VR_WIDTH,
+                         &out->matched, &out->informative);
+    if (guard_verdict == LG_GUARD_REJECT)
         return out->status = VR_BACKGROUND;
+    out->guard_warn = guard_verdict == LG_GUARD_WARN;
     lp_result_t value;
     if (lp_measure(pattern, f->gray, f->length, VR_WIDTH, full_pixels, &value) != LP_OK ||
         value.relative_pct == 255)

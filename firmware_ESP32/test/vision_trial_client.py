@@ -22,9 +22,11 @@ def main():
     parser.add_argument('--node', required=True, type=uuid.UUID)
     parser.add_argument('--roi', required=True, type=uuid.UUID)
     parser.add_argument('--session', required=True, type=uuid.UUID)
-    parser.add_argument('--action', choices=('status', 'empty', 'full', 'sample', 'cleanup'), required=True)
+    parser.add_argument('--action', choices=('status', 'empty', 'full', 'sample', 'cleanup', 'wipe_calibration'), required=True)
     parser.add_argument('--confirm-cleanup', action='store_true',
                         help='Explicit permission to remove the experimental reference only')
+    parser.add_argument('--confirm-wipe-cal',
+                        help='Literal ERASE_CAL: deletes ALL local calibration of every ROI')
     parser.add_argument('--discard-current', action='store_true',
                         help='Also permit discarding the reference matching --session and --roi')
     parser.add_argument('--condition', default='unlabelled')
@@ -33,6 +35,10 @@ def main():
     args = parser.parse_args()
     if args.action == 'cleanup' and not args.confirm_cleanup:
         parser.error('cleanup requires --confirm-cleanup')
+    if args.action == 'wipe_calibration' and args.confirm_wipe_cal != 'ERASE_CAL':
+        parser.error('wipe_calibration requires --confirm-wipe-cal ERASE_CAL')
+    if args.confirm_wipe_cal and args.action != 'wipe_calibration':
+        parser.error('--confirm-wipe-cal requires --action wipe_calibration')
     if args.discard_current and args.action != 'cleanup':
         parser.error('--discard-current requires --action cleanup and --confirm-cleanup')
     base = f'selfiq/{args.branch}/{args.node}/shelf_cam'
@@ -46,6 +52,8 @@ def main():
         command['confirm_cleanup'] = True
         if args.discard_current:
             command['confirm_discard_current'] = True
+    if args.action == 'wipe_calibration':
+        command['confirm_wipe_cal'] = args.confirm_wipe_cal
     done = threading.Event()
     messages = []
     error = []
@@ -93,7 +101,8 @@ def main():
         acceptable = {'status': {'uncalibrated', 'empty_ready', 'ready'},
                       'empty': {'empty_captured'}, 'full': {'full_captured'},
                       'sample': {'sample_done'},
-                      'cleanup': {'cleanup_completed', 'cleanup_no_reference'}}
+                      'cleanup': {'cleanup_completed', 'cleanup_no_reference'},
+                      'wipe_calibration': {'wipe_completed'}}
         if final.get('status') not in acceptable[args.action]:
             raise SystemExit('Device refused action: ' + str(final.get('status')))
         if args.action == 'sample':

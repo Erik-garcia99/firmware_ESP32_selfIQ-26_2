@@ -5,7 +5,10 @@
 #include "esp_http_client.h"
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/calibration/calibration_frame.h"
+#include "modules/calibration/calibration_store.h"
 #include "modules/roi/roi_store.h"
+#include "modules/vision/local_guard.h"
+#include "modules/vision/local_pattern.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -377,6 +380,156 @@ static void camera_handle_calibration(const camera_cal_request_t *request)
                               build_error, NULL, 0, false,
                               cal_error_code(build_error));
             return;
+        }
+
+        /* Referencia del motor de ocupacion, construida con el MISMO frame del
+         * que se extrae el descriptor 8x8. El descriptor viaja a app/backend;
+         * el blob del kernel queda en NVS y no se transmite. */
+        if (request->kind == CAMERA_CAL_KIND_EMPTY) {
+            cal_rect_t rect;
+            if (cal_roi_to_rect(frame->width, frame->height, roi, &rect) == CAL_OK &&
+                rect.right > rect.left && rect.bottom > rect.top) {
+                lp_context_t *pattern = heap_caps_calloc(
+                    1, sizeof(*pattern), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                lg_context_t *guard = heap_caps_calloc(
+                    1, sizeof(*guard), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (pattern && guard &&
+                    lp_init(pattern, frame->width, frame->height, rect.left,
+                            rect.top, rect.right - rect.left,
+                            rect.bottom - rect.top) == LP_OK &&
+                    !lg_init(guard, frame->width, frame->height, rect.left,
+                             rect.top, rect.right - rect.left,
+                             rect.bottom - rect.top)) {
+                    if (lp_add_empty(pattern, frame->buf, frame->len,
+                                     frame->width) == LP_OK &&
+                        !lg_add(guard, frame->buf, frame->len, frame->width) &&
+                        lp_finish_empty(pattern) == LP_OK && !lg_finish(guard)) {
+                        size_t tiles = pattern->count + guard->count;
+                        uint8_t *kernel_tiles = malloc(tiles * CAL_KERNEL_TILE_BYTES);
+                        if (kernel_tiles) {
+                            size_t at = 0;
+                            for (uint32_t i = 0; i < pattern->count; ++i)
+                                for (unsigned k = 0; k < LP_FEATURES; ++k)
+                                    kernel_tiles[at++] =
+                                        (uint8_t)pattern->reference[i][k];
+                            for (uint32_t i = 0; i < guard->count; ++i)
+                                for (unsigned k = 0; k < 16U; ++k)
+                                    kernel_tiles[at++] =
+                                        (uint8_t)guard->ref[i][k];
+                            cal_kernel_ref_t ref;
+                            memset(&ref, 0, sizeof(ref));
+                            memcpy(ref.roi_id, request->roi_id,
+                                   sizeof(ref.roi_id));
+                            ref.config_version = request->config_version;
+                            ref.calibration_version =
+                                request->calibration_version;
+                            ref.rect[0] = rect.left;
+                            ref.rect[1] = rect.top;
+                            ref.rect[2] = rect.right - rect.left;
+                            ref.rect[3] = rect.bottom - rect.top;
+                            ref.tile_count = pattern->count;
+                            ref.guard_count = guard->count;
+                            ref.tiles = kernel_tiles;
+                            ref.tiles_bytes = tiles * CAL_KERNEL_TILE_BYTES;
+                            ref.full_pixels = 0U; /* se fija al capturar "lleno" */
+                            esp_err_t kerr = calibration_store_save_kernel_ref(&ref);
+                            if (kerr != ESP_OK)
+                                ESP_LOGW(TAG, "Kernel de %s no guardado: %s",
+                                         request->roi_id,
+                                         esp_err_to_name(kerr));
+                            else
+                                ESP_LOGI(TAG, "Kernel de %s guardado (%u tiles)",
+                                         request->roi_id,
+                                         (unsigned)tiles);
+                            free(kernel_tiles);
+                        }
+                    }
+                }
+                free(pattern);
+                free(guard);
+            }
+        } else if (request->kind == CAMERA_CAL_KIND_FULL) {
+            /* El lleno se mide con la referencia de vacio ya guardada. Con un
+             * solo frame la calidad es la del barrido de 1 captura; se fija
+             * full_pixels = ocupados de este frame. */
+            cal_kernel_ref_t ref;
+            memset(&ref, 0, sizeof(ref));
+            memcpy(ref.roi_id, request->roi_id, sizeof(ref.roi_id));
+            ref.config_version = request->config_version;
+            ref.calibration_version = request->calibration_version;
+            if (calibration_store_get_kernel_ref(&ref) == ESP_OK &&
+                ref.tiles_bytes > 0U) {
+                uint8_t *tiles = malloc(ref.tiles_bytes);
+                if (tiles) {
+                    ref.tiles = tiles;
+                    ref.tiles_capacity = ref.tiles_bytes;
+                    if (calibration_store_get_kernel_ref(&ref) == ESP_OK) {
+                        lp_context_t *pattern = heap_caps_calloc(
+                            1, sizeof(*pattern),
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                        lg_context_t *guard = heap_caps_calloc(
+                            1, sizeof(*guard),
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                        if (pattern && guard) {
+                            if (lp_init(pattern, frame->width, frame->height,
+                                        ref.rect[0], ref.rect[1],
+                                        ref.rect[2], ref.rect[3]) == LP_OK &&
+                                 !lg_init(guard, frame->width, frame->height,
+                                          ref.rect[0], ref.rect[1],
+                                          ref.rect[2], ref.rect[3]) &&
+                                 pattern->count == ref.tile_count &&
+                                 guard->count == ref.guard_count &&
+                                 ref.tiles_bytes == 16U *
+                                     ((size_t)ref.tile_count + ref.guard_count)) {
+                                /* Restaurar tiles desde NVS. */
+                                size_t at = 0;
+                                for (uint32_t i = 0; i < ref.tile_count; ++i)
+                                    for (unsigned k = 0; k < LP_FEATURES; ++k)
+                                        pattern->reference[i][k] =
+                                            tiles[at++];
+                                for (uint32_t i = 0; i < ref.guard_count; ++i)
+                                    for (unsigned k = 0; k < 16U; ++k)
+                                        guard->ref[i][k] = tiles[at++];
+                                pattern->count = ref.tile_count;
+                                guard->count = ref.guard_count;
+                                pattern->cols = (ref.rect[2] + 15U) / 16U;
+                                pattern->rows = (ref.rect[3] + 15U) / 16U;
+                                pattern->ready = 1U;
+                                guard->ready = 1U;
+                                pattern->samples = 1U;
+                                guard->samples = 1U;
+                                lp_result_t result;
+                                esp_err_t merr = (esp_err_t)lp_measure(
+                                    pattern, frame->buf, frame->len,
+                                    frame->width, 0U, &result);
+                                if (merr == LP_OK && result.occupied_pixels > 0U &&
+                                    result.occupied_pixels <=
+                                        ref.rect[2] * ref.rect[3]) {
+                                    esp_err_t saved = calibration_store_set_kernel_full_pixels(
+                                        request->roi_id, request->config_version,
+                                        request->calibration_version,
+                                        result.occupied_pixels);
+                                    if (saved == ESP_OK) ESP_LOGI(TAG,
+                                             "Lleno de %s: %lu px ocupados",
+                                             request->roi_id,
+                                             (unsigned long)result.occupied_pixels);
+                                    else ESP_LOGE(TAG, "Lleno no persistido: %s",
+                                                  esp_err_to_name(saved));
+                                } else {
+                                    ESP_LOGW(TAG,
+                                             "Lleno de %s no medido: lp=%d occ=%lu area=%lu",
+                                             request->roi_id, (int)merr,
+                                             (unsigned long)result.occupied_pixels,
+                                             (unsigned long)(ref.rect[2] * ref.rect[3]));
+                                }
+                            }
+                        }
+                        free(pattern);
+                        free(guard);
+                    }
+                }
+                free(tiles);
+            }
         }
 
         uint8_t *jpeg = NULL;

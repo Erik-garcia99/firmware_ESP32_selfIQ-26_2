@@ -117,7 +117,8 @@ class VisionTrialRuntimeTests(unittest.TestCase):
                 str(ROOT / 'managed_components/espressif__cjson/cJSON/cJSON.c'),
                 '-lm', '-o', str(temp / 'trial'),
             ]
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            compiled = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
             result = subprocess.run([str(temp / 'trial')], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

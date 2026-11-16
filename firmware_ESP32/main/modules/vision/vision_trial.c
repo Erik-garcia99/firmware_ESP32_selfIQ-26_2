@@ -6,6 +6,7 @@
 #include "modules/camera/camera_lib.h"
 #include "modules/roi/roi_store.h"
 #include "modules/calibration/calibration_store.h"
+#include "modules/MQTT/mqtt_lib.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -14,6 +15,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #define TRIAL_MAGIC 0x3158504cU
@@ -24,7 +26,7 @@
 #define TRIAL_BLOB_MAX 12000U
 static const char *TAG = "VISION_TRIAL";
 typedef struct {
-    char req[37], session[37], roi[37], action[12];
+    char req[37], session[37], roi[37], action[24];
     int64_t requested_us;
     bool discard_current;
 } trial_request_t;
@@ -40,7 +42,7 @@ static lg_context_t *guard;
 static trial_header_t header;
 static unsigned stage; /* 0 uncalibrated, 1 empty_ready, 2 durable ready */
 static bool attempted_load;
-static char seen_req[8][37], seen_session[8][37], seen_action[8][12], seen_roi[8][37];
+static char seen_req[8][37], seen_session[8][37], seen_action[8][24], seen_roi[8][37];
 static unsigned seen_next;
 static bool seen_discard_current[8];
 /* Camera-task-only diagnostics; never stored in the reference format. */
@@ -49,10 +51,33 @@ static const char *last_save_step = "not_started";
 static size_t last_save_bytes;
 static nvs_stats_t cleanup_before;
 static bool cleanup_before_valid;
+/* Borrado total de calibracion (mantenimiento): ultimo informe emitido. */
+static cal_store_erase_report_t wipe_report;
+static bool wipe_trial_removed;
+static bool wipe_roi_ok;
 static vision_pilot_health_t pilot_health;
 static bool pilot_binding_checked, pilot_binding_valid;
 static uint32_t pilot_binding_revision, pilot_binding_config;
 static int64_t pilot_checked_us, pilot_previous_us;
+static uint32_t pilot_loaded_revision;
+static uint32_t pilot_loaded_config;
+static int64_t pilot_load_checked_us;
+/* Referencia de produccion (pareja de la app + kernel por ROI). El slot
+ * experimental (selfiq_vexp) queda solo para diagnostico. */
+#define PROD_MAX_ROI 2U
+#define PROD_PUBLISH_US 10000000LL
+static int64_t production_published_us[PROD_MAX_ROI];
+static int64_t production_attempt_us[PROD_MAX_ROI];
+static uint32_t production_published, production_queue_rejected;
+static bool using_production;
+static unsigned production_count;
+static unsigned production_index;
+static char production_roi_id[PROD_MAX_ROI][CAL_STORE_UUID_CHARS + 1U];
+static uint32_t production_full_pixels[PROD_MAX_ROI];
+static cal_store_pair_t production_binding[PROD_MAX_ROI];
+static uint32_t production_rect[PROD_MAX_ROI][4];
+static lp_context_t *prod_pattern[PROD_MAX_ROI];
+static lg_context_t *prod_guard[PROD_MAX_ROI];
 /* Read-only sample diagnostics. No sensor setters or persisted-format changes.
  * Register values are read near capture, not atomically latched to the frame. */
 static struct {
@@ -201,23 +226,32 @@ static void reply(const trial_request_t *q, const char *status,
     cJSON_AddNumberToObject(root, "uptime_ms", (double)(esp_timer_get_time() / 1000));
     cJSON_AddNumberToObject(root, "matched", matched);
     cJSON_AddNumberToObject(root, "informative", informative);
+    if (informative) {
+        lg_verdict_t guard_verdict = lg_guard_band(matched, informative);
+        cJSON_AddStringToObject(root, "guard_level", lg_verdict_name(guard_verdict));
+        cJSON_AddBoolToObject(root, "guard_warn", guard_verdict == LG_GUARD_WARN);
+    }
     cJSON_AddNumberToObject(root, "heap_internal",
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     cJSON_AddNumberToObject(root, "free_psram", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     bool cleanup = !strcmp(q->action, "cleanup");
+    bool wipe = !strcmp(q->action, "wipe_calibration");
     bool storage_failure = !strcmp(status, "persistence_or_context_failed") ||
-                           !strcmp(status, "cleanup_failed");
+                           !strcmp(status, "cleanup_failed") ||
+                           !strcmp(status, "wipe_failed");
     if (storage_failure) {
         cJSON_AddStringToObject(root, "failure_reason",
+            wipe ? "wipe_failed" :
             cleanup ? "cleanup_failed" :
             last_save_error == ESP_OK ? "context_changed" : "persistence_failed");
         cJSON_AddStringToObject(root, "storage_error", esp_err_to_name(last_save_error));
         cJSON_AddNumberToObject(root, "storage_error_code", last_save_error);
         cJSON_AddStringToObject(root, "storage_step",
-            !cleanup && last_save_error == ESP_OK ? "context_recheck" : last_save_step);
+            (!cleanup && !wipe && last_save_error == ESP_OK) ? "context_recheck"
+                                                            : last_save_step);
         cJSON_AddNumberToObject(root, "reference_bytes", last_save_bytes);
     }
-    if (storage_failure || cleanup) {
+    if (storage_failure || cleanup || wipe) {
         nvs_stats_t stats;
         esp_err_t stats_err = nvs_get_stats(NULL, &stats);
         if (stats_err == ESP_OK) {
@@ -230,6 +264,19 @@ static void reply(const trial_request_t *q, const char *status,
         cJSON_AddStringToObject(root, "cleanup_policy",
             q->discard_current ? "discard_matching_session" : "obsolete_only");
         cJSON_AddBoolToObject(root, "removed", !strcmp(status, "cleanup_completed"));
+        if (cleanup_before_valid)
+            cJSON_AddNumberToObject(root, "nvs_available_entries_before",
+                                   cleanup_before.available_entries);
+    }
+    if (wipe) {
+        cJSON_AddStringToObject(root, "wipe_scope",
+                                CAL_STORE_NAMESPACE "," TRIAL_NAMESPACE "/" TRIAL_KEY);
+        cJSON_AddStringToObject(root, "wipe_policy", "all_calibration_keys");
+        cJSON_AddBoolToObject(root, "trial_removed", wipe_trial_removed);
+        cJSON_AddNumberToObject(root, "cal_keys_removed",
+                                (double)wipe_report.keys_removed);
+        cJSON_AddBoolToObject(root, "cal_verified_empty", wipe_report.verified_empty);
+        cJSON_AddBoolToObject(root, "roi_blob_ok", wipe_roi_ok);
         if (cleanup_before_valid)
             cJSON_AddNumberToObject(root, "nvs_available_entries_before",
                                    cleanup_before.available_entries);
@@ -379,6 +426,13 @@ static void discard_trial_ram(void) {
     memset(&header, 0, sizeof(header));
     free(pattern); pattern = NULL;
     free(guard); guard = NULL;
+    using_production = false;
+    for (unsigned i = 0; i < production_count; ++i) {
+        free(prod_pattern[i]); prod_pattern[i] = NULL;
+        free(prod_guard[i]); prod_guard[i] = NULL;
+    }
+    production_count = 0;
+    production_index = 0;
 }
 
 static const char *cleanup_reference(const trial_request_t *q) {
@@ -478,12 +532,69 @@ static const char *cleanup_reference(const trial_request_t *q) {
     /* A new, valid empty pending in RAM is deliberately preserved. */
     return "cleanup_completed";
 }
+
+/* Mantenimiento explicito: deja el nodo sin ninguna calibracion local.
+ * Orden: primero la referencia experimental (NVS y RAM), para que ninguna
+ * medicion posterior use una pareja que se va a borrar; despues todas las
+ * claves de selfiq_cal. No toca selfiq_cfg (Wi-Fi/broker/identidad),
+ * selfiq_roi (geometria aplicada) ni el resto de namespaces. */
+static const char *wipe_calibration(void) {
+    last_save_error = ESP_OK;
+    last_save_bytes = 0;
+    wipe_trial_removed = false;
+    wipe_roi_ok = false;
+    memset(&wipe_report, 0, sizeof(wipe_report));
+    cleanup_before_valid = nvs_get_stats(NULL, &cleanup_before) == ESP_OK;
+
+    last_save_step = "wipe_trial_open";
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(TRIAL_NAMESPACE, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        last_save_step = "wipe_trial_erase";
+        esp_err_t erased = nvs_erase_key(h, TRIAL_KEY);
+        if (erased == ESP_OK) {
+            wipe_trial_removed = true;
+            last_save_step = "nvs_commit";
+            err = nvs_commit(h);
+        } else if (erased != ESP_ERR_NVS_NOT_FOUND) {
+            err = erased;
+        }
+        nvs_close(h);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK; /* Namespace inexistente: nada que borrar. */
+    }
+    /* La RAM se descarta siempre: el blob pudo borrarse o no existir. */
+    discard_trial_ram();
+    attempted_load = true;
+    if (err != ESP_OK) {
+        last_save_error = err;
+        return "wipe_failed";
+    }
+
+    last_save_step = "wipe_calibration_store";
+    err = calibration_store_erase_all(&wipe_report);
+    if (err != ESP_OK) {
+        last_save_error = err;
+        return "wipe_failed";
+    }
+
+    /* El borrado es de solo selfiq_cal; comprobar que la geometria aplicada
+     * sobrevivio evita declarar exito con una NVS danada. */
+    roi_blob_t snap;
+    wipe_roi_ok = roi_store_snapshot(&snap) && roi_blob_verify(&snap);
+    last_save_step = "wipe_done";
+    ESP_LOGW(TAG, "Calibracion borrada por mantenimiento: claves=%u trial=%d roi_ok=%d",
+             (unsigned)wipe_report.keys_removed, (int)wipe_trial_removed,
+             (int)wipe_roi_ok);
+    return "wipe_completed";
+}
+
 esp_err_t vision_trial_init(void) {
     if (!queue) {
         queue = xQueueCreate(1, sizeof(trial_request_t));
         if (queue)
-            ESP_LOGI(TAG, "E3_PILOT_V1: automatic local measurement; "
-                     "single experimental reference slot; roi_occ disabled");
+            ESP_LOGI(TAG, "E4_ROI_OCC_V1: max_roi=2 period_ms=10000; "
+                     "production-only telemetry; experimental diagnostics isolated");
     }
     return queue ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -507,11 +618,113 @@ static bool pilot_roi_bound(const roi_blob_t *snapshot) {
     return false;
 }
 
+static bool pilot_prod_bound(unsigned slot, const roi_blob_t *snapshot) {
+    if (snapshot->config_version != production_binding[slot].config_version)
+        return false;
+    for (size_t i = 0; i < snapshot->count; ++i) {
+        const roi_def_t *roi = &snapshot->rois[i];
+        if (strcmp(roi->id, production_roi_id[slot])) continue;
+        cal_rect_t rect;
+        cal_roi_t geometry = {normalized(roi->x), normalized(roi->y),
+                              normalized(roi->w), normalized(roi->h)};
+        return cal_roi_to_rect(VR_WIDTH, VR_HEIGHT, geometry, &rect) == CAL_OK &&
+            production_rect[slot][0] == rect.left &&
+            production_rect[slot][1] == rect.top &&
+            production_rect[slot][2] == (uint32_t)(rect.right - rect.left) &&
+            production_rect[slot][3] == (uint32_t)(rect.bottom - rect.top);
+    }
+    return false;
+}
+
 static void pilot_reject(const char *status, bool missing) {
     pilot_health.status = status;
     ++pilot_health.rejected;
     if (missing) ++pilot_health.references_missing;
     else ++pilot_health.context_rejected;
+}
+
+static bool pilot_load_production(void) {
+    roi_blob_t snapshot;
+    if (!roi_store_snapshot(&snapshot) || !snapshot.count) return false;
+    /* Liberar referencias de produccion anteriores. */
+    for (unsigned i = 0; i < production_count; ++i) {
+        free(prod_pattern[i]); prod_pattern[i] = NULL;
+        free(prod_guard[i]); prod_guard[i] = NULL;
+    }
+    production_count = 0;
+    production_index = 0;
+    using_production = false;
+    if (!allocate()) return false;
+    for (size_t i = 0; i < snapshot.count && production_count < PROD_MAX_ROI; ++i) {
+        cal_store_pair_t pair;
+        cal_rect_t rect;
+        if (!current_binding(snapshot.rois[i].id, &pair, &rect)) continue;
+        cal_kernel_ref_t kref;
+        memset(&kref, 0, sizeof(kref));
+        memcpy(kref.roi_id, snapshot.rois[i].id, sizeof(kref.roi_id));
+        kref.config_version = pair.config_version;
+        kref.calibration_version = pair.calibration_version;
+        uint8_t *tiles = NULL;
+        /* Primero solo metadatos para validar version. */
+        if (calibration_store_get_kernel_ref(&kref) != ESP_OK) continue;
+        /* Releer con buffer de tiles. */
+        tiles = malloc(kref.tiles_bytes);
+        if (!tiles) continue;
+        kref.tiles = tiles;
+        kref.tiles_capacity = kref.tiles_bytes;
+        if (calibration_store_get_kernel_ref(&kref) != ESP_OK) { free(tiles); continue; }
+        lp_context_t *pat = heap_caps_calloc(1, sizeof(*pat), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        lg_context_t *grd = heap_caps_calloc(1, sizeof(*grd), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!pat || !grd) { free(pat); free(grd); free(tiles); continue; }
+        uint32_t fp = 0;
+        /* Poblar contextos en RAM desde el blob. */
+        if (!kref.tile_count || !kref.guard_count || !kref.rect[2] || !kref.rect[3] ||
+            kref.tiles_bytes != ((size_t)kref.tile_count + kref.guard_count) * CAL_KERNEL_TILE_BYTES) {
+            free(pat); free(grd); free(tiles); continue;
+        }
+        if (lp_init(pat, VR_WIDTH, VR_HEIGHT, kref.rect[0], kref.rect[1], kref.rect[2], kref.rect[3]) != LP_OK) { free(pat); free(grd); free(tiles); continue; }
+        if (lg_init(grd, VR_WIDTH, VR_HEIGHT, kref.rect[0], kref.rect[1], kref.rect[2], kref.rect[3])) { free(pat); free(grd); free(tiles); continue; }
+        if (pat->count != kref.tile_count || grd->count != kref.guard_count ||
+            kref.rect[0] != rect.left || kref.rect[1] != rect.top ||
+            kref.rect[2] != (uint32_t)(rect.right - rect.left) ||
+            kref.rect[3] != (uint32_t)(rect.bottom - rect.top)) {
+            free(pat); free(grd); free(tiles); continue;
+        }
+        {
+            size_t at = 0;
+            for (uint32_t i = 0; i < kref.tile_count; ++i)
+                for (unsigned k = 0; k < LP_FEATURES; ++k)
+                    pat->reference[i][k] = tiles[at++];
+            for (uint32_t i = 0; i < kref.guard_count; ++i)
+                for (unsigned k = 0; k < 16U; ++k)
+                    grd->ref[i][k] = tiles[at++];
+            pat->count = kref.tile_count;
+            pat->cols = (kref.rect[2] + 15U) / 16U;
+            pat->rows = (kref.rect[3] + 15U) / 16U;
+            pat->ready = 1U;
+            pat->samples = 1U;
+            grd->count = kref.guard_count;
+            grd->ready = 1U;
+            grd->samples = 1U;
+            fp = kref.full_pixels;
+        }
+        if (!fp) { free(pat); free(grd); free(tiles); continue; }
+        unsigned slot = production_count++;
+        memcpy(production_roi_id[slot], snapshot.rois[i].id, CAL_STORE_UUID_CHARS + 1U);
+        production_binding[slot] = pair;
+        production_full_pixels[slot] = fp;
+        production_rect[slot][0] = kref.rect[0];
+        production_rect[slot][1] = kref.rect[1];
+        production_rect[slot][2] = kref.rect[2];
+        production_rect[slot][3] = kref.rect[3];
+        prod_pattern[slot] = pat;
+        prod_guard[slot] = grd;
+        production_published_us[slot] = production_attempt_us[slot] = 0;
+        free(tiles);
+    }
+    if (production_count == 0) return false;
+    using_production = true;
+    return true;
 }
 
 static void pilot_process(const camera_fb_t *frame, int64_t now) {
@@ -521,27 +734,68 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         pilot_reject("context_unavailable", false);
         return;
     }
+    /* Recargar si la calibracion cambio (commit nuevo): el nodo puede haber
+     * construido una referencia de produccion despues del arranque. */
+    if (attempted_load && (pilot_loaded_revision != revision ||
+                           pilot_loaded_config != snapshot.config_version ||
+                           (!using_production && stage != 2 &&
+                            now - pilot_load_checked_us >= 60000000))) {
+        attempted_load = false;
+        using_production = false;
+        for (unsigned i = 0; i < production_count; ++i) {
+            free(prod_pattern[i]); prod_pattern[i] = NULL;
+            free(prod_guard[i]); prod_guard[i] = NULL;
+        }
+        production_count = 0;
+        production_index = 0;
+        stage = 0;
+        memset(&header, 0, sizeof(header));
+        free(pattern); pattern = NULL;
+        free(guard); guard = NULL;
+        pilot_binding_checked = false;
+    }
     if (!attempted_load && snapshot.count) {
         if (!allocate()) {
             pilot_reject("psram_required", true);
             return;
         }
-        for (size_t i = 0; i < snapshot.count; ++i) {
-            load(snapshot.rois[i].id);
-            if (stage == 2) break;
+        /* Produccion primero: si hay al menos una ROI con pareja + kernel,
+         * se usa y el slot experimental queda solo para diagnostico. */
+        if (!pilot_load_production()) {
+            for (size_t i = 0; i < snapshot.count; ++i) {
+                load(snapshot.rois[i].id);
+                if (stage == 2) break;
+            }
         }
+        attempted_load = true;
+        pilot_loaded_revision = revision;
+        pilot_loaded_config = snapshot.config_version;
+        pilot_load_checked_us = now;
         pilot_binding_checked = false;
     }
-    if (stage != 2) {
+    if (stage != 2 && !(using_production && production_count > 0)) {
         pilot_health.other_rois_skipped += snapshot.count;
         pilot_reject("references_required", true);
         return;
     }
-    if (snapshot.count > 1) pilot_health.other_rois_skipped += snapshot.count - 1U;
-    memcpy(pilot_health.roi_id, header.binding.roi_id, sizeof(pilot_health.roi_id));
-    pilot_health.config_version = header.binding.config_version;
-    pilot_health.calibration_version = header.binding.calibration_version;
-    if (!pilot_roi_bound(&snapshot)) {
+    if (!using_production && snapshot.count > 1)
+        pilot_health.other_rois_skipped += snapshot.count - 1U;
+    unsigned slot = 0;
+    if (using_production) {
+        slot = production_index % production_count;
+        production_index = (production_index + 1U) % production_count;
+    }
+    if (using_production) {
+        memcpy(pilot_health.roi_id, production_roi_id[slot],
+               sizeof(pilot_health.roi_id));
+        pilot_health.config_version = production_binding[slot].config_version;
+        pilot_health.calibration_version = production_binding[slot].calibration_version;
+    } else {
+        memcpy(pilot_health.roi_id, header.binding.roi_id, sizeof(pilot_health.roi_id));
+        pilot_health.config_version = header.binding.config_version;
+        pilot_health.calibration_version = header.binding.calibration_version;
+    }
+    if (using_production ? !pilot_prod_bound(slot, &snapshot) : !pilot_roi_bound(&snapshot)) {
         pilot_reject("context_changed", false);
         return;
     }
@@ -552,8 +806,12 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         (!pilot_binding_valid && now - pilot_checked_us >= 60000000)) {
         cal_store_pair_t active;
         cal_rect_t rect;
-        pilot_binding_valid = current_binding(header.binding.roi_id, &active, &rect) &&
-                              same_binding(&active, &header.binding);
+        if (using_production) {
+            pilot_binding_valid = pilot_prod_bound(slot, &snapshot);
+        } else {
+            pilot_binding_valid = current_binding(header.binding.roi_id, &active, &rect) &&
+                                  same_binding(&active, &header.binding);
+        }
         pilot_binding_revision = revision;
         pilot_binding_config = snapshot.config_version;
         pilot_binding_checked = true;
@@ -576,11 +834,15 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
                             frame->timestamp.tv_usec;
     }
     vr_result_t result;
-    vr_status_t status = vr_measure(pattern, guard, header.full_pixels, &input, &result);
+    lp_context_t *pat = using_production ? prod_pattern[slot] : pattern;
+    lg_context_t *grd = using_production ? prod_guard[slot] : guard;
+    uint32_t fp = using_production ? production_full_pixels[slot] : header.full_pixels;
+    vr_status_t status = vr_measure(pat, grd, fp, &input, &result);
     if (input.captured_us > pilot_previous_us && input.captured_us <= input.now_us)
         pilot_previous_us = input.captured_us;
     roi_blob_t after;
-    if (!roi_store_snapshot(&after) || !pilot_roi_bound(&after) ||
+    if (!roi_store_snapshot(&after) ||
+        (using_production ? !pilot_prod_bound(slot, &after) : !pilot_roi_bound(&after)) ||
         calibration_store_revision() != revision) {
         pilot_binding_checked = false;
         pilot_reject("context_changed", false);
@@ -598,10 +860,39 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         return;
     }
     ++pilot_health.accepted;
+    pilot_health.guard_warn += result.guard_warn ? 1U : 0U;
     pilot_health.valid = true;
     pilot_health.occupancy_pct = result.value.relative_pct;
     pilot_health.relative_unclamped_q8 = result.value.relative_unclamped_q8;
     pilot_health.captured_us = input.captured_us;
+    /* Only production results can enter the durable-receipt MQTT queue.
+     * One event/ROI/10 s; retry a full queue at most once/second.
+     * Never reuse a previous percentage on frame/context rejection. */
+    if (using_production &&
+        (!production_published_us[slot] ||
+         now - production_published_us[slot] >= PROD_PUBLISH_US) &&
+        (!production_attempt_us[slot] ||
+         now - production_attempt_us[slot] >= 1000000)) {
+        char data[224];
+        int n = snprintf(data, sizeof(data),
+            "{\"roi_id\":\"%s\",\"value\":%u,\"config_version\":%lu,"
+            "\"calibration_version\":%lu,\"captured_uptime_ms\":%llu}",
+            production_roi_id[slot], (unsigned)result.value.relative_pct,
+            (unsigned long)production_binding[slot].config_version,
+            (unsigned long)production_binding[slot].calibration_version,
+            (unsigned long long)(input.captured_us / 1000));
+        production_attempt_us[slot] = now;
+        if (n > 0 && (size_t)n < sizeof(data) &&
+            mqtt_queue_json("roi_occ", data) == ESP_OK) {
+            production_published_us[slot] = now;
+            ++production_published;
+            ESP_LOGI(TAG, "ROI_OCC_QUEUED: roi=%s cfg=%lu cal=%lu pct=%u",
+                     production_roi_id[slot],
+                     (unsigned long)production_binding[slot].config_version,
+                     (unsigned long)production_binding[slot].calibration_version,
+                     (unsigned)result.value.relative_pct);
+        } else ++production_queue_rejected;
+    }
 }
 
 void vision_pilot_process_frame(const camera_fb_t *frame) {
@@ -633,21 +924,25 @@ void vision_pilot_health_log(uint32_t stack_min_free) {
     vision_pilot_health_t h;
     vision_pilot_health(&h);
     ESP_LOGI(TAG, "E3_PILOT: roi=%s cfg=%lu cal=%lu status=%s valid=%u pct=%d "
-             "raw_q8=%lu match=%lu/%lu frames=%lu accepted=%lu rejected=%lu "
-             "frame_rej=%lu clip_rej=%lu bg_rej=%lu weak_rej=%lu ctx_rej=%lu "
-             "refs_missing=%lu other_roi_skips=%lu us=%lu max_us=%lu "
-             "stack_min=%lu publication=disabled",
+             "raw_q8=%lu guard=%lu/%lu guard_warn=%lu frames=%lu accepted=%lu "
+             "rejected=%lu frame_rej=%lu clip_rej=%lu bg_rej=%lu weak_rej=%lu "
+             "ctx_rej=%lu refs_missing=%lu other_roi_skips=%lu us=%lu max_us=%lu "
+             "stack_min=%lu source=%s publication=prod_only queued=%lu queue_rej=%lu",
              h.roi_id[0] ? h.roi_id : "-", (unsigned long)h.config_version,
              (unsigned long)h.calibration_version, h.status, (unsigned)h.valid,
              h.valid ? (int)h.occupancy_pct : -1,
              (unsigned long)h.relative_unclamped_q8, (unsigned long)h.matched,
-             (unsigned long)h.informative, (unsigned long)h.frames,
+             (unsigned long)h.informative, (unsigned long)h.guard_warn,
+             (unsigned long)h.frames,
              (unsigned long)h.accepted, (unsigned long)h.rejected,
              (unsigned long)h.frame_rejected, (unsigned long)h.clipping_rejected,
              (unsigned long)h.background_rejected, (unsigned long)h.weak_rejected,
              (unsigned long)h.context_rejected, (unsigned long)h.references_missing,
              (unsigned long)h.other_rois_skipped, (unsigned long)h.processing_us,
-             (unsigned long)h.max_processing_us, (unsigned long)stack_min_free);
+             (unsigned long)h.max_processing_us, (unsigned long)stack_min_free,
+             using_production ? "prod" : "exp",
+             (unsigned long)production_published,
+             (unsigned long)production_queue_rejected);
 }
 
 esp_err_t vision_trial_submit(const cJSON *root, bool retained) {
@@ -665,6 +960,13 @@ esp_err_t vision_trial_submit(const cJSON *root, bool retained) {
     if (!strcmp(q.action, "cleanup") &&
         !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "confirm_cleanup")))
         return ESP_ERR_INVALID_ARG;
+    if (!strcmp(q.action, "wipe_calibration")) {
+        /* Literal exacto: no basta un booleano que se pueda enviar por error. */
+        const cJSON *confirm =
+            cJSON_GetObjectItemCaseSensitive(root, "confirm_wipe_cal");
+        if (!cJSON_IsString(confirm) || strcmp(confirm->valuestring, "ERASE_CAL"))
+            return ESP_ERR_INVALID_ARG;
+    }
     const cJSON *discard = cJSON_GetObjectItemCaseSensitive(root, "confirm_discard_current");
     if (discard && (!cJSON_IsBool(discard) || strcmp(q.action, "cleanup")))
         return ESP_ERR_INVALID_ARG;
@@ -672,7 +974,8 @@ esp_err_t vision_trial_submit(const cJSON *root, bool retained) {
     if (!roi_uuid_valid(q.req) || !roi_uuid_valid(q.roi) || !roi_uuid_valid(q.session) ||
         (strcmp(q.action, "empty") && strcmp(q.action, "full") &&
          strcmp(q.action, "sample") && strcmp(q.action, "status") &&
-         strcmp(q.action, "cleanup"))) return ESP_ERR_INVALID_ARG;
+         strcmp(q.action, "cleanup") && strcmp(q.action, "wipe_calibration")))
+        return ESP_ERR_INVALID_ARG;
     q.requested_us = esp_timer_get_time();
     return xQueueSend(queue, &q, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -719,6 +1022,12 @@ bool vision_trial_service(void) {
     seen_discard_current[slot] = q.discard_current;
     if (!strcmp(q.action, "cleanup")) {
         const char *status = cleanup_reference(&q);
+        reply(&q, status, NULL, 0, 0, 0, 0);
+        return true;
+    }
+    if (!strcmp(q.action, "wipe_calibration")) {
+        /* Antes de allocate(): el borrado no necesita PSRAM ni captura. */
+        const char *status = wipe_calibration();
         reply(&q, status, NULL, 0, 0, 0, 0);
         return true;
     }
@@ -769,13 +1078,23 @@ bool vision_trial_service(void) {
             if (lp_add_empty(pattern, f->buf, f->len, f->width) != LP_OK ||
                 lg_add(guard, f->buf, f->len, f->width)) failure = "reference_failed";
         } else if (!failure) {
-            if (lg_check(guard, f->buf, f->len, f->width, &matched, &informative))
+            lg_verdict_t guard_verdict =
+                lg_guard_verdict(guard, f->buf, f->len, f->width, &matched, &informative);
+            if (guard_verdict == LG_GUARD_REJECT) {
                 failure = "background_inconclusive";
-            else if (lp_measure(pattern, f->buf, f->len, f->width,
+            } else {
+                if (guard_verdict == LG_GUARD_WARN)
+                    ESP_LOGW(TAG, "guard_warn: matched=%lu informative=%lu "
+                                  "(banda %u-%u %%)",
+                             (unsigned long)matched, (unsigned long)informative,
+                             (unsigned)LG_GUARD_REJECT_PCT,
+                             (unsigned)LG_GUARD_PASS_PCT);
+                if (lp_measure(pattern, f->buf, f->len, f->width,
                      !strcmp(q.action, "sample") ? header.full_pixels : 0, &result) != LP_OK)
-                failure = "measurement_failed";
-            else if ((uint64_t)result.weak_reference_pixels * 100 > (uint64_t)result.total_pixels * 25)
-                failure = "weak_reference";
+                    failure = "measurement_failed";
+                else if ((uint64_t)result.weak_reference_pixels * 100 > (uint64_t)result.total_pixels * 25)
+                    failure = "weak_reference";
+            }
         }
         int64_t processing_us = esp_timer_get_time() - started;
         if (!strcmp(q.action, "sample")) diagnose_frame(f);

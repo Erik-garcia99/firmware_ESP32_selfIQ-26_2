@@ -26,7 +26,8 @@ typedef struct {
 typedef struct {
     vr_status_t status;
     lp_result_t value; /* relative_pct=255 on EVERY rejected result */
-    uint32_t matched, informative;
+    uint32_t matched, informative; /* guarda de fondo, no el patrón del ROI */
+    uint8_t guard_warn; /* 1 si la guarda quedó en la banda 25-60 % y se midió */
 } vr_result_t;
 
 vr_status_t vr_measure(lp_context_t *pattern, const lg_context_t *guard,
