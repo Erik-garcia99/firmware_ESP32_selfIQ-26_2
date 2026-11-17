@@ -41,6 +41,9 @@ def main():
         parser.error('--confirm-wipe-cal requires --action wipe_calibration')
     if args.discard_current and args.action != 'cleanup':
         parser.error('--discard-current requires --action cleanup and --confirm-cleanup')
+    if args.log is not None and (args.log.is_dir() or not str(args.log).strip()):
+        parser.error('--log requires a file path; got a directory. An unset shell '
+                     'variable expands to an empty string: set it or omit --log.')
     base = f'selfiq/{args.branch}/{args.node}/shelf_cam'
     req = str(uuid.uuid4())
     command = {
@@ -61,8 +64,14 @@ def main():
         event = {'at': datetime.now(timezone.utc).isoformat(),
                  'condition': args.condition, 'kind': kind, 'data': value}
         if args.log:
-            with args.log.open('a') as output:
-                output.write(json.dumps(event, ensure_ascii=False) + '\n')
+            try:
+                with args.log.open('a') as output:
+                    output.write(json.dumps(event, ensure_ascii=False) + '\n')
+            except OSError as exc:
+                # Nunca dejar que una escritura del log mate el hilo de paho:
+                # el programa principal esperaria hasta el timeout sin motivo.
+                error.append('log_error:' + type(exc).__name__)
+                done.set()
         print(json.dumps(event, ensure_ascii=False), flush=True)
     def connected(client, userdata, flags, code, properties):
         if code.is_failure:

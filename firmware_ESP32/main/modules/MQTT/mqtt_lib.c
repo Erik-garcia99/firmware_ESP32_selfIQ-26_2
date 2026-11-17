@@ -368,7 +368,12 @@ static void cal_result_handler(const camera_cal_result_t *result) {
              result->request.capture_id);
     return;
   }
-  cal_cmd_t cmd = s_pending_cal_cmd;
+  /* Callback sincrono y no reentrante de la unica tarea de camara. Estos
+   * buffers NO se comparten con cal_worker ni con el hilo de eventos MQTT:
+   * mantener la copia estable sin cargar su stack antes de entrar a NVS. */
+  static cal_cmd_t cmd;
+  static char ack[CAL_ACK_JSON_SIZE];
+  cmd = s_pending_cal_cmd;
 
   /* Decodificar el descriptor serializado a la forma esperada por el store. */
   cal_descriptor_t descriptor;
@@ -415,7 +420,6 @@ static void cal_result_handler(const camera_cal_result_t *result) {
   capture_ack.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
   capture_ack.persisted = true;
 
-  char ack[CAL_ACK_JSON_SIZE];
   if (!cal_ack_capture(ack, sizeof(ack), &cmd, &capture_ack)) {
     ESP_LOGE(TAG, "[CAL] ACK de captura no construido (demasiado grande)");
     s_has_pending_cal_cmd = false;

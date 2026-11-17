@@ -786,9 +786,7 @@ esp_err_t calibration_store_drop_kernel_ref(const char *roi_id) {
     if (err == ESP_OK) ESP_LOGI(TAG, "Kernel de %s borrado", roi_id);
     return err;
 }
-#define CAL_ERASE_KEYS_MAX 96U
 typedef struct {
-    char keys[CAL_ERASE_KEYS_MAX][16];
     size_t count;
 } cal_erase_scan_t;
 
@@ -802,10 +800,9 @@ static esp_err_t scan_namespace(cal_erase_scan_t *scan) {
                                    NVS_TYPE_ANY, &it);
     while (err == ESP_OK) {
         nvs_entry_info_t info;
-        if (nvs_entry_info(it, &info) == ESP_OK && info.key[0] &&
-            scan->count < CAL_ERASE_KEYS_MAX)
-            snprintf(scan->keys[scan->count++], sizeof(scan->keys[0]), "%s",
-                     info.key);
+        err = nvs_entry_info(it, &info);
+        if (err != ESP_OK) break;
+        if (info.key[0]) ++scan->count;
         err = nvs_entry_next(&it);
     }
     nvs_release_iterator(it);
@@ -829,37 +826,30 @@ esp_err_t calibration_store_erase_all(cal_store_erase_report_t *report) {
         report->available_entries_before = before.available_entries;
     }
 
-    esp_err_t err = ESP_OK;
-    for (unsigned pass = 0; pass < 8U; ++pass) {
-        cal_erase_scan_t scan;
-        err = scan_namespace(&scan);
-        if (err != ESP_OK || scan.count == 0) break;
+    cal_erase_scan_t scan;
+    esp_err_t err = scan_namespace(&scan);
+    bool scanned = err == ESP_OK;
+    if (err == ESP_OK && scan.count != 0) {
         nvs_handle_t h;
         err = nvs_open(CAL_STORE_NAMESPACE, NVS_READWRITE, &h);
-        if (err != ESP_OK) break;
-        size_t removed = 0;
-        for (size_t i = 0; i < scan.count; ++i) {
-            esp_err_t one = nvs_erase_key(h, scan.keys[i]);
-            if (one == ESP_OK) ++removed;
-            else if (one != ESP_ERR_NVS_NOT_FOUND) {
-                err = one;
-                break;
-            }
-        }
-        if (err == ESP_OK) err = nvs_commit(h);
-        nvs_close(h);
-        report->keys_removed += removed;
-        /* Sin progreso real no se insiste: evita un bucle de borrado inutil. */
-        if (err == ESP_OK && removed == 0) {
-            err = ESP_ERR_INVALID_STATE;
-            break;
+        if (err == ESP_OK) {
+            /* Solo el namespace del handle, nunca la particion NVS.
+             * La API del SDK borra sus items sin depender de buscar cada clave. */
+            err = nvs_erase_all(h);
+            if (err == ESP_OK) err = nvs_commit(h);
+            nvs_close(h);
         }
     }
 
-    if (err == ESP_OK) {
+    /* Incluso un borrado fallido puede haber liberado parte del namespace.
+     * Informar la diferencia observable sin ocultar el error original. */
+    if (scanned) {
         cal_erase_scan_t again;
-        err = scan_namespace(&again);
-        report->verified_empty = err == ESP_OK && again.count == 0;
+        esp_err_t verify_err = scan_namespace(&again);
+        if (verify_err == ESP_OK && again.count <= scan.count)
+            report->keys_removed = scan.count - again.count;
+        report->verified_empty = verify_err == ESP_OK && again.count == 0;
+        if (err == ESP_OK) err = verify_err;
         if (err == ESP_OK && !report->verified_empty)
             err = ESP_ERR_INVALID_STATE;
     }

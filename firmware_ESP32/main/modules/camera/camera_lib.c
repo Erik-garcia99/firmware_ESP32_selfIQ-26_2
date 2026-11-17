@@ -274,7 +274,9 @@ static void camera_cal_report(const camera_cal_request_t *request,
                               bool upload_enqueued,
                               const char *detail)
 {
-    camera_cal_result_t result;
+    /* Solo camera_task llama a esta funcion; el callback consume la estructura
+     * antes de regresar. No retener su direccion ni usarla desde el uploader. */
+    static camera_cal_result_t result;
     memset(&result, 0, sizeof(result));
     result.request = *request;
     result.status = status;
@@ -884,6 +886,14 @@ static void camera_task(void *arg)
 
         if (has_calibration) {
             camera_handle_calibration(&cal_request);
+            /* High-water mark en bytes en ESP-IDF: minimo historico de esta
+             * tarea, no heap libre ni espacio disponible solo en este instante. */
+            uint32_t stack_min = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+            ESP_LOGI(TAG, "STACK: operation=calibration min_free=%lu budget=%u",
+                     (unsigned long)stack_min, (unsigned)CAMERA_TASK_STACK_BYTES);
+            if (stack_min < CAMERA_STACK_WARN_BYTES)
+                ESP_LOGW(TAG, "STACK_LOW: selfiq_camera min_free=%lu threshold=%u",
+                         (unsigned long)stack_min, (unsigned)CAMERA_STACK_WARN_BYTES);
         } else if (vision_trial_service()) {
             /* Experimental capture owns/releases every frame; no production data. */
         } else {
@@ -912,6 +922,12 @@ static void camera_task(void *arg)
                     }
                     if (pending[0]) {
                         camera_send_snapshot(frame, pending);
+                        uint32_t stack_min = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+                        ESP_LOGI(TAG, "STACK: operation=snapshot min_free=%lu budget=%u",
+                                 (unsigned long)stack_min, (unsigned)CAMERA_TASK_STACK_BYTES);
+                        if (stack_min < CAMERA_STACK_WARN_BYTES)
+                            ESP_LOGW(TAG, "STACK_LOW: selfiq_camera min_free=%lu threshold=%u",
+                                     (unsigned long)stack_min, (unsigned)CAMERA_STACK_WARN_BYTES);
                         pending[0] = '\0';
                     }
                 } else {

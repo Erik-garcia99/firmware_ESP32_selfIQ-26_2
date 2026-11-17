@@ -24,6 +24,8 @@
 #define CAMERA_CAPTURE_INTERVAL_MS 1000U
 #define CAMERA_INIT_RETRY_MS 5000U
 #define CAMERA_TASK_STACK_BYTES 8192U
+/* Umbral de diagnostico, no garantia de margen para todas las escenas/rutas. */
+#define CAMERA_STACK_WARN_BYTES 1536U
 #define CAMERA_HEALTH_INTERVAL_MS 60000U
 #define CAMERA_TASK_PRIORITY 2U
 #define CAMERA_LOG_EVERY_FRAMES 10U
@@ -132,7 +134,9 @@ esp_err_t camera_request_snapshot(const char *req_id);
  * operación pendiente (el consumidor debe responder `busy`). */
 esp_err_t camera_request_calibration(const camera_cal_request_t *request);
 
-/* El handler se invoca desde la tarea de cámara, una vez construidos
+/* El handler se invoca sincronicamente y sin reentrada desde la unica tarea de
+ * cámara. El resultado usa un buffer reutilizable: no retener el puntero tras
+ * retornar ni llamar al handler desde otra tarea. Se invoca una vez construidos
  * descriptor/JPEG y encolada (o descartada) la subida. Debe ser corto y no
  * bloquear: E5.4 lo usará para persistir y publicar el ACK. */
 void camera_set_cal_result_handler(camera_cal_result_cb_t handler);

@@ -24,21 +24,23 @@ bool roi_uuid_valid(const char *p) {
 }
 #define MAX_KEYS 50
 #define MAX_PAYLOAD 6144
-typedef struct {char key[16]; unsigned char buf[MAX_PAYLOAD]; size_t len; bool occupied;} entry_t;
+typedef struct {char key[16]; unsigned char buf[MAX_PAYLOAD]; size_t len; bool occupied; bool foreign;} entry_t;
 static entry_t entries[MAX_KEYS];
+static int erase_limit = -1;
+static bool erase_noop, fail_erase_commit, fail_entry_info;
 static int fail_selector_commit;
 static int corrupt_selector_commit;
 static char pending_selector[16];
 static uint8_t pending_selector_value;
 static bool has_pending_selector;
 static entry_t *entry(const char *key, bool allocate) {
-    for(int i=0;i<MAX_KEYS;i++)if(entries[i].occupied && !strcmp(entries[i].key,key))return &entries[i];
+    for(int i=0;i<MAX_KEYS;i++)if(entries[i].occupied && !entries[i].foreign && !strcmp(entries[i].key,key))return &entries[i];
     if(allocate)for(int i=0;i<MAX_KEYS;i++)if(!entries[i].occupied){
-        entries[i].occupied=true; snprintf(entries[i].key,sizeof(entries[i].key),"%s",key);
+        entries[i].occupied=true; entries[i].foreign=false; snprintf(entries[i].key,sizeof(entries[i].key),"%s",key);
         return &entries[i];}
     return NULL;
 }
-esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){(void)ns;(void)mode;*h=1;return ESP_OK;}
+esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){(void)mode;assert(!strcmp(ns,"selfiq_cal"));*h=1;return ESP_OK;}
 void nvs_close(nvs_handle_t h){(void)h;}
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *data,size_t *len){
     (void)h;entry_t *e=entry(key,false);if(!e)return ESP_ERR_NVS_NOT_FOUND;
@@ -66,6 +68,7 @@ esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t v){
     pending_selector_value=v;has_pending_selector=true;return ESP_OK;
 }
 esp_err_t nvs_commit(nvs_handle_t h){
+    if(fail_erase_commit){fail_erase_commit=false;return ESP_FAIL;}
     (void)h;if(has_pending_selector){
         if(fail_selector_commit){has_pending_selector=false;fail_selector_commit=0;return ESP_FAIL;}
         entry_t *e=entry(pending_selector,true);if(!e)return ESP_ERR_NO_MEM;
@@ -78,8 +81,19 @@ esp_err_t nvs_erase_key(nvs_handle_t h,const char *key){
     (void)h;entry_t *e=entry(key,false);if(!e)return ESP_ERR_NVS_NOT_FOUND;
     e->occupied=false;return ESP_OK;
 }
+esp_err_t nvs_erase_all(nvs_handle_t h){
+    assert(h==1);
+    if(erase_noop)return ESP_OK;
+    int removed=0;
+    for(int i=0;i<MAX_KEYS;i++){
+        if(!entries[i].occupied||entries[i].foreign)continue;
+        if(erase_limit>=0 && removed==erase_limit)return ESP_FAIL;
+        entries[i].occupied=false;removed++;
+    }
+    return ESP_OK;
+}
 /* Enumeracion y estadisticas: lo justo para ejercitar el borrado total sin
- * depender de ESP-IDF. Todas las claves del banco de pruebas son de selfiq_cal. */
+ * depender de ESP-IDF. Las claves foreign pertenecen a otros namespaces. */
 #define MAX_ITER 4
 struct nvs_opaque_iterator_t {int index;};
 static struct nvs_opaque_iterator_t iterators[MAX_ITER];
@@ -88,12 +102,12 @@ esp_err_t nvs_entry_find(const char *part,const char *ns,nvs_type_t type,
                          nvs_iterator_t *out){
     /* ESP-IDF real rechaza part_name NULL con ESP_ERR_INVALID_ARG. */
     if(!part||!out)return ESP_ERR_INVALID_ARG;
-    (void)ns;(void)type;
+    assert(!strcmp(ns,"selfiq_cal"));(void)type;
     *out=NULL;
     for(int slot=0;slot<MAX_ITER;slot++){
         if(iterator_used[slot])continue;
         for(int i=0;i<MAX_KEYS;i++){
-            if(!entries[i].occupied)continue;
+            if(!entries[i].occupied||entries[i].foreign)continue;
             iterator_used[slot]=true;iterators[slot].index=i;
             *out=&iterators[slot];return ESP_OK;
         }
@@ -104,12 +118,13 @@ esp_err_t nvs_entry_find(const char *part,const char *ns,nvs_type_t type,
 esp_err_t nvs_entry_next(nvs_iterator_t *it){
     if(!it||!*it)return ESP_ERR_INVALID_ARG;
     for(int i=(*it)->index+1;i<MAX_KEYS;i++){
-        if(!entries[i].occupied)continue;
+        if(!entries[i].occupied||entries[i].foreign)continue;
         (*it)->index=i;return ESP_OK;
     }
     return ESP_ERR_NVS_NOT_FOUND;
 }
 esp_err_t nvs_entry_info(const nvs_iterator_t it,nvs_entry_info_t *info){
+    if(fail_entry_info)return ESP_FAIL;
     if(!it||!info)return ESP_ERR_INVALID_ARG;
     if(it->index<0||it->index>=MAX_KEYS||!entries[it->index].occupied)
         return ESP_ERR_NVS_NOT_FOUND;
@@ -363,11 +378,34 @@ int main(void){
     for (int i=0;i<MAX_KEYS;i++) if (entries[i].occupied) keys_before++;
     assert(keys_before > 0);
     cal_store_erase_report_t report;
+    /* Otra configuracion NVS no debe entrar en el alcance del borrado. */
+    entry_t *foreign=entry("wifi_identity",true);
+    assert(foreign);foreign->foreign=true;foreign->len=4;
+    memcpy(foreign->buf,"keep",4);
+    fail_entry_info=true;
+    assert(calibration_store_erase_all(&report)==ESP_FAIL);
+    assert(!report.verified_empty && report.keys_removed==0);
+    fail_entry_info=false;
+    erase_noop=true;
+    assert(calibration_store_erase_all(&report)==ESP_ERR_INVALID_STATE);
+    assert(!report.verified_empty && report.keys_removed==0);
+    erase_noop=false;
+    erase_limit=1;
+    assert(calibration_store_erase_all(&report)==ESP_FAIL);
+    assert(!report.verified_empty && report.keys_removed==1);
+    erase_limit=-1;
+    keys_before--;
     assert(calibration_store_erase_all(&report) == ESP_OK);
     assert(report.keys_removed == keys_before);
     assert(report.verified_empty);
     assert(report.available_entries_after >= report.available_entries_before);
-    for (int i=0;i<MAX_KEYS;i++) assert(!entries[i].occupied);
+    for (int i=0;i<MAX_KEYS;i++) assert(!entries[i].occupied||entries[i].foreign);
+    assert(foreign->occupied && !memcmp(foreign->buf,"keep",4));
+    /* El error de commit no se oculta aunque el namespace ya este vacio. */
+    assert(entry("remaining",true));
+    fail_erase_commit=true;
+    assert(calibration_store_erase_all(&report)==ESP_FAIL);
+    assert(report.verified_empty && report.keys_removed==1);
     /* Repetir no es error: no quedan claves y se informa el estado real. */
     assert(calibration_store_erase_all(&report) == ESP_OK);
     assert(report.keys_removed == 0 && report.verified_empty);
