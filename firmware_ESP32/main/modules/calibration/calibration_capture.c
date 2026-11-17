@@ -62,6 +62,29 @@ cal_err_t cal_jpeg_dimensions(const uint8_t *jpeg, size_t length,
   return CAL_BAD_FRAME;
 }
 
+/* Serializa un descriptor ya resuelto y completa los campos comunes. */
+static cal_err_t capture_from_descriptor(const cal_descriptor_t *descriptor,
+                                         uint32_t width, uint32_t height,
+                                         cal_capture_t *out) {
+  if (!descriptor || !out) return CAL_BAD_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  size_t written = 0;
+  cal_err_t err =
+      cal_descriptor_encode(descriptor, out->descriptor_bytes,
+                            sizeof(out->descriptor_bytes), &written);
+  if (err != CAL_OK) return err;
+  if (written != CAL_CAPTURE_DESCRIPTOR_BYTES ||
+      descriptor->grid_side != CAL_DESCRIPTOR_GRID_WIDTH)
+    return CAL_BAD_FRAME;
+
+  out->descriptor = *descriptor;
+  out->descriptor_len = written;
+  out->descriptor_crc = cal_descriptor_crc32(descriptor);
+  out->width = (uint16_t)width;
+  out->height = (uint16_t)height;
+  return CAL_OK;
+}
+
 cal_err_t cal_capture_build(const uint8_t *gray, size_t length, uint32_t width,
                             uint32_t height, uint32_t stride, cal_roi_t roi,
                             cal_capture_t *out) {
@@ -71,22 +94,19 @@ cal_err_t cal_capture_build(const uint8_t *gray, size_t length, uint32_t width,
       cal_descriptor_extract(gray, length, width, height, stride, roi,
                              CAL_DESCRIPTOR_GRID_WIDTH, &descriptor);
   if (err != CAL_OK) return err;
+  return capture_from_descriptor(&descriptor, width, height, out);
+}
 
-  memset(out, 0, sizeof(*out));
-  size_t written = 0;
-  err = cal_descriptor_encode(&descriptor, out->descriptor_bytes,
-                              sizeof(out->descriptor_bytes), &written);
-  if (err != CAL_OK) return err;
-  if (written != CAL_CAPTURE_DESCRIPTOR_BYTES ||
-      descriptor.grid_side != CAL_DESCRIPTOR_GRID_WIDTH)
+cal_err_t cal_capture_build_median(const cal_descriptor_t *samples, size_t count,
+                                   uint32_t width, uint32_t height,
+                                   cal_capture_t *out) {
+  if (!out) return CAL_BAD_ARGUMENT;
+  if (!width || !height || width > UINT16_MAX || height > UINT16_MAX)
     return CAL_BAD_FRAME;
-
-  out->descriptor = descriptor;
-  out->descriptor_len = written;
-  out->descriptor_crc = cal_descriptor_crc32(&descriptor);
-  out->width = (uint16_t)width;
-  out->height = (uint16_t)height;
-  return CAL_OK;
+  cal_descriptor_t descriptor;
+  cal_err_t err = cal_descriptor_median(samples, count, &descriptor);
+  if (err != CAL_OK) return err;
+  return capture_from_descriptor(&descriptor, width, height, out);
 }
 
 cal_err_t cal_capture_attach_jpeg(cal_capture_t *capture, const uint8_t *jpeg,

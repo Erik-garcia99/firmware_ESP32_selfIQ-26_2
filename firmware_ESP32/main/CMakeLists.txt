@@ -14,6 +14,10 @@ idf_component_register(
         "modules/calibration/calibration_frame.c"
         "modules/calibration/calibration_sha256.c"
         "modules/calibration/calibration_capture.c"
+        "modules/vision/local_pattern.c"
+        "modules/vision/local_guard.c"
+        "modules/vision/vision_runtime.c"
+        "modules/vision/vision_trial.c"
 
     INCLUDE_DIRS
         "."
@@ -23,6 +27,7 @@ idf_component_register(
         "modules/camera"
         "modules/roi"
         "modules/calibration"
+        "modules/vision"
 
     REQUIRES
         mdns

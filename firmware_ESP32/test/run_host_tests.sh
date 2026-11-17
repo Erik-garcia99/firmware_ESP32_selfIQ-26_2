@@ -45,6 +45,8 @@ echo "calibration_core: compila limpio con -Werror"
   run core "$T/test_calibration_core.c" "$M/calibration_core.c"
 
 run frame "$T/test_calibration_frame.c" "$M/calibration_frame.c"
+run vision "$T/test_vision_core.c" "$M/calibration_core.c" \
+           "main/modules/vision/vision_core.c"
 run capture "$T/test_calibration_capture.c" "$M/calibration_capture.c" \
             "$M/calibration_core.c" "$M/calibration_sha256.c"
 run store "$T/test_calibration_store.c" "$M/calibration_store.c" "$M/calibration_core.c"

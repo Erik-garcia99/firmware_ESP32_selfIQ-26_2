@@ -59,6 +59,75 @@ int main(void) {
   assert(written == 258);
   assert(cal_descriptor_decode(encoded, written, &recovered) == CAL_OK);
   assert(recovered.grid_side == 16 && recovered.cell_count == 256);
+
+  /* Mediana por celda: varias tomas de una referencia. */
+  cal_descriptor_t samples[4];
+  for (int s = 0; s < 4; ++s) {
+    memset(&samples[s], 0, sizeof samples[s]);
+    samples[s].grid_side = 8;
+    samples[s].cell_count = 64;
+    samples[s].clipped_pct = (uint8_t)(s * 3);
+  }
+  for (int i = 0; i < 64; ++i) {
+    samples[0].cells[i] = 10;
+    samples[1].cells[i] = 20;
+    samples[2].cells[i] = 30;
+    samples[3].cells[i] = 41;
+  }
+  cal_descriptor_t median;
+  assert(cal_descriptor_median(samples, 3, &median) == CAL_OK);
+  assert(median.grid_side == 8 && median.cell_count == 64);
+  assert(median.cells[0] == 20 && median.cells[63] == 20);
+  assert(median.mean == 20 && median.contrast == 0 && median.clipped_pct == 3);
+
+  /* Par: media de centrales 20 y 31, .5 hacia arriba -> 26. */
+  samples[2].cells[0] = 31;
+  assert(cal_descriptor_median(samples, 4, &median) == CAL_OK);
+  assert(median.cells[0] == 26);
+  samples[2].cells[0] = 30;
+
+  /* El orden de las muestras no altera el resultado. */
+  assert(cal_descriptor_median(samples, 3, &median) == CAL_OK);
+  cal_descriptor_t permuted[3] = {samples[2], samples[0], samples[1]};
+  cal_descriptor_t median2;
+  assert(cal_descriptor_median(permuted, 3, &median2) == CAL_OK);
+  assert(!memcmp(median.cells, median2.cells, 64));
+  assert(median.mean == median2.mean && median.contrast == median2.contrast);
+
+  /* Una muestra recalcula las métricas desde sus celdas, conserva saturación. */
+  samples[0].clipped_pct = 7;
+  assert(cal_descriptor_median(samples, 1, &median) == CAL_OK);
+  assert(!memcmp(median.cells, samples[0].cells, 64));
+  assert(median.mean == 10 && median.contrast == 0 && median.clipped_pct == 7);
+
+  /* Solapamiento con la salida permitido. */
+  assert(cal_descriptor_median(samples, 3, &samples[0]) == CAL_OK);
+  assert(samples[0].cells[0] == 20 && samples[0].mean == 20);
+
+  /* Grid 16 también, y rechazos de longitud/grid/argumentos. */
+  cal_descriptor_t big[2];
+  for (int s = 0; s < 2; ++s) {
+    memset(&big[s], 0, sizeof big[s]);
+    big[s].grid_side = 16;
+    big[s].cell_count = 256;
+  }
+  for (int i = 0; i < 256; ++i) {
+    big[0].cells[i] = 40;
+    big[1].cells[i] = 60;
+  }
+  assert(cal_descriptor_median(big, 2, &median) == CAL_OK);
+  assert(median.grid_side == 16 && median.cell_count == 256);
+  assert(median.cells[255] == 50 && median.mean == 50 && median.contrast == 0);
+  assert(cal_descriptor_median(samples, 0, &median) == CAL_BAD_ARGUMENT);
+  assert(cal_descriptor_median(samples, CAL_DESCRIPTOR_MEDIAN_MAX + 1, &median) ==
+         CAL_BAD_ARGUMENT);
+  assert(cal_descriptor_median(NULL, 3, &median) == CAL_BAD_ARGUMENT);
+  assert(cal_descriptor_median(samples, 3, NULL) == CAL_BAD_ARGUMENT);
+  cal_descriptor_t mismatched[2] = {big[0], samples[0]};
+  assert(cal_descriptor_median(mismatched, 2, &median) == CAL_BAD_GRID);
+  mismatched[1].grid_side = 8;
+  mismatched[1].cell_count = 63;
+  assert(cal_descriptor_median(mismatched, 2, &median) == CAL_BAD_GRID);
   puts("E2 calibration_core: pruebas host OK");
   return 0;
 }

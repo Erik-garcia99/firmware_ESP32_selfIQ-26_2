@@ -64,6 +64,15 @@ cal_err_t cal_descriptor_extract(const uint8_t *gray, size_t length,
  * NO es una medida calibrada de porcentaje de ocupación. */
 cal_err_t cal_descriptor_mae(const cal_descriptor_t *a,
                              const cal_descriptor_t *b, float *out_mae);
+/* Mediana por celda de `count` descriptores del mismo grid (1..9). Con count
+ * par promedia las dos celdas centrales redondeando hacia arriba (a+b+1)/2.
+ * Recalcula mean/contrast desde las celdas resultantes; clipped_pct es la
+ * mediana de las muestras (no se reconstruye desde las medias). No usa heap,
+ * no modifica las muestras y admite que `out` solape con `samples`.
+ * Pensado para promediar varias tomas de una referencia de calibración. */
+#define CAL_DESCRIPTOR_MEDIAN_MAX 9U
+cal_err_t cal_descriptor_median(const cal_descriptor_t *samples, size_t count,
+                                cal_descriptor_t *out);
 /* Contrato bytes v1: [format_version=1][grid_side=8|16][grid*grid bytes].
  * Sin padding, longitud exacta, sin métricas auxiliares. El mismo arreglo
  * se envía como descriptor base64 al backend para su pair_hash SHA-256.

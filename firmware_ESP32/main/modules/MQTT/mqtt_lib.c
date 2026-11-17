@@ -30,6 +30,7 @@
 #include "modules/roi/roi_cmd.h"
 #include "modules/roi/roi_core.h"
 #include "modules/roi/roi_store.h"
+#include "modules/vision/vision_trial.h"
 
 
 static const char *TAG = "selfiq_mqtt";
@@ -239,6 +240,16 @@ esp_err_t mqtt_publish_ack_json(const char *payload) {
   return id < 0 ? ESP_FAIL : ESP_OK;
 }
 
+esp_err_t mqtt_publish_trial_json(const char *payload) {
+  if (!payload || !*payload) return ESP_ERR_INVALID_ARG;
+  if (!s_client || !s_mqtt_connected || !s_registered) return ESP_ERR_INVALID_STATE;
+  char topic[MAX_TOPIC_LEN];
+  snprintf(topic, sizeof(topic), "selfiq/%s/%s/%s/experimental/result",
+           s_branch_id, s_esp_id, NODE_MODULE);
+  int id = esp_mqtt_client_enqueue(s_client, topic, payload, 0, 1, 0, true);
+  return id < 0 ? ESP_FAIL : ESP_OK;
+}
+
 static void roi_send_ack(const char *req_id, bool ok, uint32_t version,
                          size_t count, const char *error) {
   char payload[ROI_ACK_JSON_SIZE];
@@ -357,7 +368,12 @@ static void cal_result_handler(const camera_cal_result_t *result) {
              result->request.capture_id);
     return;
   }
-  cal_cmd_t cmd = s_pending_cal_cmd;
+  /* Callback sincrono y no reentrante de la unica tarea de camara. Estos
+   * buffers NO se comparten con cal_worker ni con el hilo de eventos MQTT:
+   * mantener la copia estable sin cargar su stack antes de entrar a NVS. */
+  static cal_cmd_t cmd;
+  static char ack[CAL_ACK_JSON_SIZE];
+  cmd = s_pending_cal_cmd;
 
   /* Decodificar el descriptor serializado a la forma esperada por el store. */
   cal_descriptor_t descriptor;
@@ -404,7 +420,6 @@ static void cal_result_handler(const camera_cal_result_t *result) {
   capture_ack.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
   capture_ack.persisted = true;
 
-  char ack[CAL_ACK_JSON_SIZE];
   if (!cal_ack_capture(ack, sizeof(ack), &cmd, &capture_ack)) {
     ESP_LOGE(TAG, "[CAL] ACK de captura no construido (demasiado grande)");
     s_has_pending_cal_cmd = false;
@@ -695,6 +710,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id,
 
       if (cal_type(cmd_type)) {
         handle_cal_cmd(event->data, event->data_len);
+      } else if (!strcmp(cmd_type, "vision.experimental")) {
+        esp_err_t err = vision_trial_submit(root, event->retain);
+        if (err != ESP_OK)
+          ESP_LOGW(TAG, "vision.experimental rejected: %s", esp_err_to_name(err));
       } else if (!strcmp(cmd_type, "roi.set")) {
         handle_roi_set(root);
       } else if (!strcmp(cmd_type, "snapshot.request")) {

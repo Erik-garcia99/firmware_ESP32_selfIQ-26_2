@@ -2,7 +2,9 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "nvs.h"
 #include "esp_log.h"
@@ -10,6 +12,12 @@
 #include "modules/roi/roi_core.h"
 
 static const char *TAG = "SELFIQ_CAL_STORE";
+static atomic_uint_least32_t s_active_revision;
+static atomic_flag s_commit_busy = ATOMIC_FLAG_INIT;
+
+uint32_t calibration_store_revision(void) {
+    return atomic_load_explicit(&s_active_revision, memory_order_acquire);
+}
 
 /* Formato binario fijo, sin structs con padding. Cada banco es autocontenido.
  * (magic, version, flags, IDs, hash, versiones, capturas, descriptores, CRC).
@@ -38,6 +46,13 @@ static uint32_t read32(const uint8_t *p) {
     for (unsigned i = 0; i < 4U; ++i) v |= (uint32_t)p[i] << (i * 8U);
     return v;
 }
+static void write16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8U);
+}
+static uint16_t read16(const uint8_t *p) {
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8U));
+}
 static uint32_t crc32_bytes(const uint8_t *p, size_t n) {
     uint32_t crc = 0xffffffffU;
     while (n--) {
@@ -59,10 +74,10 @@ static bool hash_ok(const char *hash) {
     return true;
 }
 static bool roi_matches(const char *roi_id, uint32_t version) {
-    const roi_blob_t *current = roi_store_current();
-    if (!current || current->config_version != version) return false;
-    for (size_t i = 0; i < current->count; ++i)
-        if (!strcmp(current->rois[i].id, roi_id)) return true;
+    roi_blob_t current;
+    if (!roi_store_snapshot(&current) || current.config_version != version) return false;
+    for (size_t i = 0; i < current.count; ++i)
+        if (!strcmp(current.rois[i].id, roi_id)) return true;
     return false;
 }
 static bool descriptor_ok(const uint8_t *src) {
@@ -312,7 +327,7 @@ esp_err_t calibration_store_save_draft(const cal_store_reference_t *ref) {
     return err;
 }
 
-esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_id,
+static esp_err_t commit_pair(const char *roi_id, const char *calibration_id,
                                    const char *empty_capture_id,
                                    const char *full_capture_id) {
     if (!uuid_ok(roi_id) || !uuid_ok(calibration_id) ||
@@ -395,6 +410,20 @@ esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_i
     return err;
 }
 
+esp_err_t calibration_store_commit(const char *roi_id, const char *calibration_id,
+                                   const char *empty_capture_id,
+                                   const char *full_capture_id) {
+    if (atomic_flag_test_and_set_explicit(&s_commit_busy, memory_order_acquire))
+        return ESP_ERR_INVALID_STATE;
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_acq_rel);
+    esp_err_t err = commit_pair(roi_id, calibration_id, empty_capture_id, full_capture_id);
+    /* Even on error the active selector may have changed before readback
+     * failed: consumers must reload instead of trusting their old cache. */
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_release);
+    atomic_flag_clear_explicit(&s_commit_busy, memory_order_release);
+    return err;
+}
+
 esp_err_t calibration_store_cancel(const char *roi_id, const char *calibration_id) {
     if (!uuid_ok(roi_id) || !uuid_ok(calibration_id)) return ESP_ERR_INVALID_ARG;
     char key[16];
@@ -464,4 +493,384 @@ esp_err_t calibration_store_status_body(const char *roi_id, char *out, size_t si
         return ESP_ERR_INVALID_SIZE;
     }
     return ESP_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * Referencia local del motor de ocupacion (una por ROI).
+ *
+ * No sustituye al descriptor 8x8: ese sigue viajando a app y backend. El kernel
+ * mide con tiles de 16 px y 16 valores por tile, que no se pueden reconstruir
+ * desde 64 medias de celda. Por eso el nodo guarda su propia referencia en la
+ * misma captura de calibracion y la liga a config_version + calibration_version:
+ * al recalibrar cambia la version y la referencia vieja deja de aceptarse sin
+ * borrar nada.
+ *
+ * Disposicion fija, little-endian, sin padding de struct:
+ *   0  magic 'KRN1'  | 4  version 1 | 5  reservado (0)
+ *   6  roi_id (36)   | 42 config    | 46 calibration_version | 50 full_pixels
+ *   54 rect[4] u32   | 70 tile_count u16 | 72 guard_count u16
+ *   74 tiles (16 B cada uno)          | ultimos 4 B: CRC32 de todo lo anterior
+ * ---------------------------------------------------------------------- */
+#define CAL_KERNEL_MAGIC 0x314e524bUL /* "KRN1" */
+#define CAL_KERNEL_VERSION 1U
+#define CAL_KERNEL_ID_OFFSET 6U
+#define CAL_KERNEL_CONFIG_OFFSET (CAL_KERNEL_ID_OFFSET + CAL_STORE_UUID_CHARS)
+#define CAL_KERNEL_CAL_OFFSET (CAL_KERNEL_CONFIG_OFFSET + 4U)
+#define CAL_KERNEL_FULL_OFFSET (CAL_KERNEL_CAL_OFFSET + 4U)
+#define CAL_KERNEL_RECT_OFFSET (CAL_KERNEL_FULL_OFFSET + 4U)
+#define CAL_KERNEL_TILES_OFFSET (CAL_KERNEL_RECT_OFFSET + 4U * 4U)
+#define CAL_KERNEL_GUARDS_OFFSET (CAL_KERNEL_TILES_OFFSET + 2U)
+#define CAL_KERNEL_DATA_OFFSET (CAL_KERNEL_GUARDS_OFFSET + 2U)
+#define CAL_KERNEL_HEADER_BYTES (CAL_KERNEL_DATA_OFFSET + 4U)
+#define CAL_KERNEL_MAX_BYTES                                                   \
+    (CAL_KERNEL_HEADER_BYTES + CAL_KERNEL_TILE_BYTES * CAL_KERNEL_MAX_TILES)
+
+/* El marco de tiles de un ROI pequeno no llega ni al minimo: 16 B por tile. */
+static size_t kernel_blob_size(size_t tiles) {
+    return CAL_KERNEL_DATA_OFFSET + tiles * CAL_KERNEL_TILE_BYTES + 4U;
+}
+
+static void kernel_encode(const cal_kernel_ref_t *r, uint8_t *dst, size_t len) {
+    memset(dst, 0, len);
+    write32(dst, CAL_KERNEL_MAGIC);
+    dst[4] = CAL_KERNEL_VERSION;
+    memcpy(dst + CAL_KERNEL_ID_OFFSET, r->roi_id, CAL_STORE_UUID_CHARS);
+    write32(dst + CAL_KERNEL_CONFIG_OFFSET, r->config_version);
+    write32(dst + CAL_KERNEL_CAL_OFFSET, r->calibration_version);
+    write32(dst + CAL_KERNEL_FULL_OFFSET, r->full_pixels);
+    for (unsigned i = 0; i < 4U; ++i)
+        write32(dst + CAL_KERNEL_RECT_OFFSET + i * 4U, r->rect[i]);
+    write16(dst + CAL_KERNEL_TILES_OFFSET, r->tile_count);
+    write16(dst + CAL_KERNEL_GUARDS_OFFSET, r->guard_count);
+    memcpy(dst + CAL_KERNEL_DATA_OFFSET, r->tiles, r->tiles_bytes);
+    write32(dst + len - 4U, crc32_bytes(dst, len - 4U));
+}
+
+/* Valida estructura, CRC y pertenencia. roi_id NULL solo comprueba el formato. */
+static esp_err_t kernel_validate(const uint8_t *src, size_t len,
+                                 const char *roi_id) {
+    if (len < CAL_KERNEL_HEADER_BYTES || len > CAL_KERNEL_MAX_BYTES)
+        return ESP_ERR_INVALID_SIZE;
+    if (read32(src) != CAL_KERNEL_MAGIC || src[4] != CAL_KERNEL_VERSION ||
+        src[5] != 0U)
+        return ESP_ERR_INVALID_CRC;
+    if (read32(src + len - 4U) != crc32_bytes(src, len - 4U))
+        return ESP_ERR_INVALID_CRC;
+    const uint16_t tiles = read16(src + CAL_KERNEL_TILES_OFFSET);
+    const uint16_t guards = read16(src + CAL_KERNEL_GUARDS_OFFSET);
+    if (!tiles || !guards || (size_t)tiles + guards > CAL_KERNEL_MAX_TILES)
+        return ESP_ERR_INVALID_CRC;
+    if (kernel_blob_size((size_t)tiles + guards) != len) return ESP_ERR_INVALID_SIZE;
+    char stored[CAL_STORE_UUID_CHARS + 1U] = {0};
+    memcpy(stored, src + CAL_KERNEL_ID_OFFSET, CAL_STORE_UUID_CHARS);
+    if (!uuid_ok(stored)) return ESP_ERR_INVALID_CRC;
+    if (roi_id && strcmp(roi_id, stored)) return ESP_ERR_INVALID_STATE;
+    if (!read32(src + CAL_KERNEL_CAL_OFFSET)) return ESP_ERR_INVALID_CRC;
+    return ESP_OK;
+}
+
+static void kernel_decode(const uint8_t *src, cal_kernel_ref_t *r) {
+    memset(r, 0, sizeof(*r));
+    memcpy(r->roi_id, src + CAL_KERNEL_ID_OFFSET, CAL_STORE_UUID_CHARS);
+    r->config_version = read32(src + CAL_KERNEL_CONFIG_OFFSET);
+    r->calibration_version = read32(src + CAL_KERNEL_CAL_OFFSET);
+    r->full_pixels = read32(src + CAL_KERNEL_FULL_OFFSET);
+    for (unsigned i = 0; i < 4U; ++i)
+        r->rect[i] = read32(src + CAL_KERNEL_RECT_OFFSET + i * 4U);
+    r->tile_count = read16(src + CAL_KERNEL_TILES_OFFSET);
+    r->guard_count = read16(src + CAL_KERNEL_GUARDS_OFFSET);
+    r->tiles_bytes =
+        ((size_t)r->tile_count + r->guard_count) * CAL_KERNEL_TILE_BYTES;
+}
+
+/* Lee el blob completo a memoria. En un ROI de demo son ~5.3 KB: se reserva y
+ * se libera dentro de la misma llamada, nunca queda retenido. */
+static esp_err_t kernel_read_raw(nvs_handle_t h, const char *key,
+                                 const char *roi_id, uint8_t **out,
+                                 size_t *out_len) {
+    if (!out || !out_len) return ESP_ERR_INVALID_ARG;
+    *out = NULL;
+    *out_len = 0;
+    size_t len = 0;
+    esp_err_t err = nvs_get_blob(h, key, NULL, &len);
+    if (err != ESP_OK) return err; /* Incluye ESP_ERR_NVS_NOT_FOUND. */
+    if (len < CAL_KERNEL_HEADER_BYTES || len > CAL_KERNEL_MAX_BYTES)
+        return ESP_ERR_INVALID_SIZE;
+    uint8_t *blob = malloc(len);
+    if (!blob) return ESP_ERR_NO_MEM;
+    err = nvs_get_blob(h, key, blob, &len);
+    if (err == ESP_OK) err = kernel_validate(blob, len, roi_id);
+    if (err != ESP_OK) {
+        free(blob);
+        return err;
+    }
+    *out = blob;
+    *out_len = len;
+    return ESP_OK;
+}
+
+esp_err_t calibration_store_save_kernel_ref(const cal_kernel_ref_t *ref) {
+    if (!ref || !ref->tiles || !uuid_ok(ref->roi_id) ||
+        !ref->calibration_version)
+        return ESP_ERR_INVALID_ARG;
+    if (!ref->tile_count || !ref->guard_count || !ref->rect[2] || !ref->rect[3])
+        return ESP_ERR_INVALID_ARG;
+    const size_t total = (size_t)ref->tile_count + ref->guard_count;
+    if (total > CAL_KERNEL_MAX_TILES) return ESP_ERR_INVALID_ARG;
+    if (ref->tiles_bytes != total * CAL_KERNEL_TILE_BYTES)
+        return ESP_ERR_INVALID_ARG;
+    /* full_pixels=0 significa "todavia sin referencia de lleno"; el motor
+     * devuelve relative_pct sin recortar mientras siga asi. */
+    if ((uint64_t)ref->full_pixels >
+        (uint64_t)ref->rect[2] * (uint64_t)ref->rect[3])
+        return ESP_ERR_INVALID_ARG;
+    if (!roi_matches(ref->roi_id, ref->config_version))
+        return ESP_ERR_INVALID_STATE;
+
+    const size_t len = kernel_blob_size(total);
+    uint8_t *blob = malloc(len);
+    if (!blob) return ESP_ERR_NO_MEM;
+    kernel_encode(ref, blob, len);
+
+    char key[16];
+    esp_err_t err = make_key('k', ref->roi_id, key);
+    if (err == ESP_OK) {
+        nvs_handle_t h;
+        err = nvs_open(CAL_STORE_NAMESPACE, NVS_READWRITE, &h);
+        if (err == ESP_OK) {
+            /* Colision de clave: el blob guardado se comprueba antes de
+             * sobrescribir. Un blob corrupto se reescribe (autocuracion), pero
+             * una clave que pertenece a otra ROI jamas se pisa. */
+            uint8_t *prev = NULL;
+            size_t prev_len = 0;
+            err = kernel_read_raw(h, key, ref->roi_id, &prev, &prev_len);
+            free(prev);
+            if (err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_SIZE) {
+                ESP_LOGW(TAG, "Kernel previo ilegible (%s); se reescribe",
+                         esp_err_to_name(err));
+                err = ESP_OK;
+            } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+                err = ESP_OK;
+            }
+            if (err == ESP_OK) err = nvs_set_blob(h, key, blob, len);
+            if (err == ESP_OK) err = nvs_commit(h);
+            if (err == ESP_OK) {
+                uint8_t *check = NULL;
+                size_t check_len = 0;
+                err = kernel_read_raw(h, key, ref->roi_id, &check, &check_len);
+                if (err == ESP_OK && (check_len != len || memcmp(check, blob, len)))
+                    err = ESP_ERR_INVALID_CRC;
+                free(check);
+            }
+            nvs_close(h);
+        }
+    }
+    free(blob);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Kernel de %s guardado: tiles=%u guarda=%u full=%lu (%u B)",
+                 ref->roi_id, (unsigned)ref->tile_count,
+                 (unsigned)ref->guard_count, (unsigned long)ref->full_pixels,
+                 (unsigned)(len + 32U));
+    else
+        ESP_LOGE(TAG, "Kernel no guardado: %s", esp_err_to_name(err));
+    return err;
+}
+
+esp_err_t calibration_store_get_kernel_ref(cal_kernel_ref_t *ref) {
+    if (!ref || !uuid_ok(ref->roi_id)) return ESP_ERR_INVALID_ARG;
+    char key[16];
+    esp_err_t err = make_key('k', ref->roi_id, key);
+    if (err != ESP_OK) return err;
+    nvs_handle_t h;
+    err = nvs_open(CAL_STORE_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    err = kernel_read_raw(h, key, ref->roi_id, &blob, &len);
+    nvs_close(h);
+    if (err != ESP_OK) return err;
+
+    /* El llamador aporta destino y version esperada; no se conserva memoria. */
+    uint8_t *dst = ref->tiles;
+    const size_t cap = ref->tiles_capacity;
+    const uint32_t want_config = ref->config_version;
+    const uint32_t want_cal = ref->calibration_version;
+    cal_kernel_ref_t got;
+    kernel_decode(blob, &got);
+    /* Version distinta = la app recalibro: se ignora sin borrar nada. */
+    if ((want_config && got.config_version != want_config) ||
+        (want_cal && got.calibration_version != want_cal)) {
+        free(blob);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (dst) {
+        if (cap < got.tiles_bytes) {
+            free(blob);
+            return ESP_ERR_INVALID_SIZE;
+        }
+        memcpy(dst, blob + CAL_KERNEL_DATA_OFFSET, got.tiles_bytes);
+    }
+    free(blob);
+    got.tiles = dst;
+    got.tiles_capacity = cap;
+    memcpy(ref, &got, sizeof(got));
+    return ESP_OK;
+}
+
+esp_err_t calibration_store_set_kernel_full_pixels(const char *roi_id,
+                                                   uint32_t config_version,
+                                                   uint32_t calibration_version,
+                                                   uint32_t full_pixels) {
+    if (!uuid_ok(roi_id) || !config_version || !calibration_version ||
+        !full_pixels)
+        return ESP_ERR_INVALID_ARG;
+    char key[16];
+    esp_err_t err = make_key('k', roi_id, key);
+    if (err != ESP_OK) return err;
+    nvs_handle_t h;
+    err = nvs_open(CAL_STORE_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    err = kernel_read_raw(h, key, roi_id, &blob, &len);
+    if (err == ESP_OK) {
+        cal_kernel_ref_t got;
+        kernel_decode(blob, &got);
+        if (got.config_version != config_version ||
+            got.calibration_version != calibration_version) {
+            err = ESP_ERR_INVALID_STATE; /* Referencia de otra calibracion. */
+        } else if ((uint64_t)full_pixels >
+                   (uint64_t)got.rect[2] * (uint64_t)got.rect[3]) {
+            err = ESP_ERR_INVALID_ARG;
+        } else if (got.full_pixels != full_pixels) {
+            write32(blob + CAL_KERNEL_FULL_OFFSET, full_pixels);
+            write32(blob + len - 4U, crc32_bytes(blob, len - 4U));
+            err = nvs_set_blob(h, key, blob, len);
+            if (err == ESP_OK) err = nvs_commit(h);
+            if (err == ESP_OK) {
+                uint8_t *check = NULL;
+                size_t check_len = 0;
+                err = kernel_read_raw(h, key, roi_id, &check, &check_len);
+                if (err == ESP_OK &&
+                    (check_len != len || memcmp(check, blob, len)))
+                    err = ESP_ERR_INVALID_CRC;
+                free(check);
+            }
+        }
+        free(blob);
+    }
+    nvs_close(h);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Lleno de %s fijado en %lu px", roi_id,
+                 (unsigned long)full_pixels);
+    else
+        ESP_LOGE(TAG, "Lleno no actualizado: %s", esp_err_to_name(err));
+    return err;
+}
+
+esp_err_t calibration_store_drop_kernel_ref(const char *roi_id) {
+    if (!uuid_ok(roi_id)) return ESP_ERR_INVALID_ARG;
+    char key[16];
+    esp_err_t err = make_key('k', roi_id, key);
+    if (err != ESP_OK) return err;
+    nvs_handle_t h;
+    err = nvs_open(CAL_STORE_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_erase_key(h, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(h);
+        return ESP_OK; /* Idempotente: ya no estaba. */
+    }
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err == ESP_OK) ESP_LOGI(TAG, "Kernel de %s borrado", roi_id);
+    return err;
+}
+typedef struct {
+    size_t count;
+} cal_erase_scan_t;
+
+static esp_err_t scan_namespace(cal_erase_scan_t *scan) {
+    if (!scan) return ESP_ERR_INVALID_ARG;
+    scan->count = 0;
+    nvs_iterator_t it = NULL;
+    /* nvs_entry_find NO acepta part_name NULL (devuelve ESP_ERR_INVALID_ARG),
+     * a diferencia de nvs_get_stats. Hay que nombrar la particion. */
+    esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, CAL_STORE_NAMESPACE,
+                                   NVS_TYPE_ANY, &it);
+    while (err == ESP_OK) {
+        nvs_entry_info_t info;
+        err = nvs_entry_info(it, &info);
+        if (err != ESP_OK) break;
+        if (info.key[0]) ++scan->count;
+        err = nvs_entry_next(&it);
+    }
+    nvs_release_iterator(it);
+    /* ESP_ERR_NVS_NOT_FOUND es el fin normal del recorrido (o namespace vacio). */
+    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+}
+
+esp_err_t calibration_store_erase_all(cal_store_erase_report_t *report) {
+    cal_store_erase_report_t local;
+    if (!report) report = &local;
+    memset(report, 0, sizeof(*report));
+
+    if (atomic_flag_test_and_set_explicit(&s_commit_busy, memory_order_acquire))
+        return ESP_ERR_INVALID_STATE;
+    /* Igual que en commit: cualquier lector con cache debe recargar. */
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_acq_rel);
+
+    nvs_stats_t before;
+    if (nvs_get_stats(NULL, &before) == ESP_OK) {
+        report->free_entries_before = before.free_entries;
+        report->available_entries_before = before.available_entries;
+    }
+
+    cal_erase_scan_t scan;
+    esp_err_t err = scan_namespace(&scan);
+    bool scanned = err == ESP_OK;
+    if (err == ESP_OK && scan.count != 0) {
+        nvs_handle_t h;
+        err = nvs_open(CAL_STORE_NAMESPACE, NVS_READWRITE, &h);
+        if (err == ESP_OK) {
+            /* Solo el namespace del handle, nunca la particion NVS.
+             * La API del SDK borra sus items sin depender de buscar cada clave. */
+            err = nvs_erase_all(h);
+            if (err == ESP_OK) err = nvs_commit(h);
+            nvs_close(h);
+        }
+    }
+
+    /* Incluso un borrado fallido puede haber liberado parte del namespace.
+     * Informar la diferencia observable sin ocultar el error original. */
+    if (scanned) {
+        cal_erase_scan_t again;
+        esp_err_t verify_err = scan_namespace(&again);
+        if (verify_err == ESP_OK && again.count <= scan.count)
+            report->keys_removed = scan.count - again.count;
+        report->verified_empty = verify_err == ESP_OK && again.count == 0;
+        if (err == ESP_OK) err = verify_err;
+        if (err == ESP_OK && !report->verified_empty)
+            err = ESP_ERR_INVALID_STATE;
+    }
+
+    nvs_stats_t after;
+    if (nvs_get_stats(NULL, &after) == ESP_OK) {
+        report->free_entries_after = after.free_entries;
+        report->available_entries_after = after.available_entries;
+    }
+
+    atomic_fetch_add_explicit(&s_active_revision, 1, memory_order_release);
+    atomic_flag_clear_explicit(&s_commit_busy, memory_order_release);
+
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "Calibraciones borradas: claves=%u vacio=%d disponible %u->%u",
+                 (unsigned)report->keys_removed, (int)report->verified_empty,
+                 (unsigned)report->available_entries_before,
+                 (unsigned)report->available_entries_after);
+    } else {
+        ESP_LOGE(TAG, "Borrado de calibraciones fallo: %s (claves=%u)",
+                 esp_err_to_name(err), (unsigned)report->keys_removed);
+    }
+    return err;
 }

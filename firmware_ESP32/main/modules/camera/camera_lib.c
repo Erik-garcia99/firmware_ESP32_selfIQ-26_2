@@ -5,7 +5,10 @@
 #include "esp_http_client.h"
 #include "modules/MQTT/mqtt_lib.h"
 #include "modules/calibration/calibration_frame.h"
+#include "modules/calibration/calibration_store.h"
 #include "modules/roi/roi_store.h"
+#include "modules/vision/local_guard.h"
+#include "modules/vision/local_pattern.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +20,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "global.h"
+#include "modules/vision/vision_trial.h"
+#include "modules/vision/vision_pilot.h"
 
 static const char *TAG = "SELFIQ_CAMERA";
 static bool camera_ready = false;
@@ -269,7 +274,9 @@ static void camera_cal_report(const camera_cal_request_t *request,
                               bool upload_enqueued,
                               const char *detail)
 {
-    camera_cal_result_t result;
+    /* Solo camera_task llama a esta funcion; el callback consume la estructura
+     * antes de regresar. No retener su direccion ni usarla desde el uploader. */
+    static camera_cal_result_t result;
     memset(&result, 0, sizeof(result));
     result.request = *request;
     result.status = status;
@@ -375,6 +382,156 @@ static void camera_handle_calibration(const camera_cal_request_t *request)
                               build_error, NULL, 0, false,
                               cal_error_code(build_error));
             return;
+        }
+
+        /* Referencia del motor de ocupacion, construida con el MISMO frame del
+         * que se extrae el descriptor 8x8. El descriptor viaja a app/backend;
+         * el blob del kernel queda en NVS y no se transmite. */
+        if (request->kind == CAMERA_CAL_KIND_EMPTY) {
+            cal_rect_t rect;
+            if (cal_roi_to_rect(frame->width, frame->height, roi, &rect) == CAL_OK &&
+                rect.right > rect.left && rect.bottom > rect.top) {
+                lp_context_t *pattern = heap_caps_calloc(
+                    1, sizeof(*pattern), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                lg_context_t *guard = heap_caps_calloc(
+                    1, sizeof(*guard), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (pattern && guard &&
+                    lp_init(pattern, frame->width, frame->height, rect.left,
+                            rect.top, rect.right - rect.left,
+                            rect.bottom - rect.top) == LP_OK &&
+                    !lg_init(guard, frame->width, frame->height, rect.left,
+                             rect.top, rect.right - rect.left,
+                             rect.bottom - rect.top)) {
+                    if (lp_add_empty(pattern, frame->buf, frame->len,
+                                     frame->width) == LP_OK &&
+                        !lg_add(guard, frame->buf, frame->len, frame->width) &&
+                        lp_finish_empty(pattern) == LP_OK && !lg_finish(guard)) {
+                        size_t tiles = pattern->count + guard->count;
+                        uint8_t *kernel_tiles = malloc(tiles * CAL_KERNEL_TILE_BYTES);
+                        if (kernel_tiles) {
+                            size_t at = 0;
+                            for (uint32_t i = 0; i < pattern->count; ++i)
+                                for (unsigned k = 0; k < LP_FEATURES; ++k)
+                                    kernel_tiles[at++] =
+                                        (uint8_t)pattern->reference[i][k];
+                            for (uint32_t i = 0; i < guard->count; ++i)
+                                for (unsigned k = 0; k < 16U; ++k)
+                                    kernel_tiles[at++] =
+                                        (uint8_t)guard->ref[i][k];
+                            cal_kernel_ref_t ref;
+                            memset(&ref, 0, sizeof(ref));
+                            memcpy(ref.roi_id, request->roi_id,
+                                   sizeof(ref.roi_id));
+                            ref.config_version = request->config_version;
+                            ref.calibration_version =
+                                request->calibration_version;
+                            ref.rect[0] = rect.left;
+                            ref.rect[1] = rect.top;
+                            ref.rect[2] = rect.right - rect.left;
+                            ref.rect[3] = rect.bottom - rect.top;
+                            ref.tile_count = pattern->count;
+                            ref.guard_count = guard->count;
+                            ref.tiles = kernel_tiles;
+                            ref.tiles_bytes = tiles * CAL_KERNEL_TILE_BYTES;
+                            ref.full_pixels = 0U; /* se fija al capturar "lleno" */
+                            esp_err_t kerr = calibration_store_save_kernel_ref(&ref);
+                            if (kerr != ESP_OK)
+                                ESP_LOGW(TAG, "Kernel de %s no guardado: %s",
+                                         request->roi_id,
+                                         esp_err_to_name(kerr));
+                            else
+                                ESP_LOGI(TAG, "Kernel de %s guardado (%u tiles)",
+                                         request->roi_id,
+                                         (unsigned)tiles);
+                            free(kernel_tiles);
+                        }
+                    }
+                }
+                free(pattern);
+                free(guard);
+            }
+        } else if (request->kind == CAMERA_CAL_KIND_FULL) {
+            /* El lleno se mide con la referencia de vacio ya guardada. Con un
+             * solo frame la calidad es la del barrido de 1 captura; se fija
+             * full_pixels = ocupados de este frame. */
+            cal_kernel_ref_t ref;
+            memset(&ref, 0, sizeof(ref));
+            memcpy(ref.roi_id, request->roi_id, sizeof(ref.roi_id));
+            ref.config_version = request->config_version;
+            ref.calibration_version = request->calibration_version;
+            if (calibration_store_get_kernel_ref(&ref) == ESP_OK &&
+                ref.tiles_bytes > 0U) {
+                uint8_t *tiles = malloc(ref.tiles_bytes);
+                if (tiles) {
+                    ref.tiles = tiles;
+                    ref.tiles_capacity = ref.tiles_bytes;
+                    if (calibration_store_get_kernel_ref(&ref) == ESP_OK) {
+                        lp_context_t *pattern = heap_caps_calloc(
+                            1, sizeof(*pattern),
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                        lg_context_t *guard = heap_caps_calloc(
+                            1, sizeof(*guard),
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                        if (pattern && guard) {
+                            if (lp_init(pattern, frame->width, frame->height,
+                                        ref.rect[0], ref.rect[1],
+                                        ref.rect[2], ref.rect[3]) == LP_OK &&
+                                 !lg_init(guard, frame->width, frame->height,
+                                          ref.rect[0], ref.rect[1],
+                                          ref.rect[2], ref.rect[3]) &&
+                                 pattern->count == ref.tile_count &&
+                                 guard->count == ref.guard_count &&
+                                 ref.tiles_bytes == 16U *
+                                     ((size_t)ref.tile_count + ref.guard_count)) {
+                                /* Restaurar tiles desde NVS. */
+                                size_t at = 0;
+                                for (uint32_t i = 0; i < ref.tile_count; ++i)
+                                    for (unsigned k = 0; k < LP_FEATURES; ++k)
+                                        pattern->reference[i][k] =
+                                            tiles[at++];
+                                for (uint32_t i = 0; i < ref.guard_count; ++i)
+                                    for (unsigned k = 0; k < 16U; ++k)
+                                        guard->ref[i][k] = tiles[at++];
+                                pattern->count = ref.tile_count;
+                                guard->count = ref.guard_count;
+                                pattern->cols = (ref.rect[2] + 15U) / 16U;
+                                pattern->rows = (ref.rect[3] + 15U) / 16U;
+                                pattern->ready = 1U;
+                                guard->ready = 1U;
+                                pattern->samples = 1U;
+                                guard->samples = 1U;
+                                lp_result_t result;
+                                esp_err_t merr = (esp_err_t)lp_measure(
+                                    pattern, frame->buf, frame->len,
+                                    frame->width, 0U, &result);
+                                if (merr == LP_OK && result.occupied_pixels > 0U &&
+                                    result.occupied_pixels <=
+                                        ref.rect[2] * ref.rect[3]) {
+                                    esp_err_t saved = calibration_store_set_kernel_full_pixels(
+                                        request->roi_id, request->config_version,
+                                        request->calibration_version,
+                                        result.occupied_pixels);
+                                    if (saved == ESP_OK) ESP_LOGI(TAG,
+                                             "Lleno de %s: %lu px ocupados",
+                                             request->roi_id,
+                                             (unsigned long)result.occupied_pixels);
+                                    else ESP_LOGE(TAG, "Lleno no persistido: %s",
+                                                  esp_err_to_name(saved));
+                                } else {
+                                    ESP_LOGW(TAG,
+                                             "Lleno de %s no medido: lp=%d occ=%lu area=%lu",
+                                             request->roi_id, (int)merr,
+                                             (unsigned long)result.occupied_pixels,
+                                             (unsigned long)(ref.rect[2] * ref.rect[3]));
+                                }
+                            }
+                        }
+                        free(pattern);
+                        free(guard);
+                    }
+                }
+                free(tiles);
+            }
         }
 
         uint8_t *jpeg = NULL;
@@ -729,6 +886,16 @@ static void camera_task(void *arg)
 
         if (has_calibration) {
             camera_handle_calibration(&cal_request);
+            /* High-water mark en bytes en ESP-IDF: minimo historico de esta
+             * tarea, no heap libre ni espacio disponible solo en este instante. */
+            uint32_t stack_min = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+            ESP_LOGI(TAG, "STACK: operation=calibration min_free=%lu budget=%u",
+                     (unsigned long)stack_min, (unsigned)CAMERA_TASK_STACK_BYTES);
+            if (stack_min < CAMERA_STACK_WARN_BYTES)
+                ESP_LOGW(TAG, "STACK_LOW: selfiq_camera min_free=%lu threshold=%u",
+                         (unsigned long)stack_min, (unsigned)CAMERA_STACK_WARN_BYTES);
+        } else if (vision_trial_service()) {
+            /* Experimental capture owns/releases every frame; no production data. */
         } else {
             int64_t started_us = esp_timer_get_time();
             camera_fb_t *frame = camera_capture();
@@ -739,6 +906,9 @@ static void camera_task(void *arg)
                 size_t bytes = frame->len;
                 bool valid = frame->buf != NULL && bytes > 0 &&
                              frame->format == PIXFORMAT_GRAYSCALE;
+                /* Read-only E3 pilot; frame remains owned by this task.
+                 * No extra capture/JPEG/HTTP/NVS write or roi_occ publication. */
+                vision_pilot_process_frame(frame);
                 if (valid) {
                     ++captured;
                     ++frames_in_window;
@@ -752,6 +922,12 @@ static void camera_task(void *arg)
                     }
                     if (pending[0]) {
                         camera_send_snapshot(frame, pending);
+                        uint32_t stack_min = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+                        ESP_LOGI(TAG, "STACK: operation=snapshot min_free=%lu budget=%u",
+                                 (unsigned long)stack_min, (unsigned)CAMERA_TASK_STACK_BYTES);
+                        if (stack_min < CAMERA_STACK_WARN_BYTES)
+                            ESP_LOGW(TAG, "STACK_LOW: selfiq_camera min_free=%lu threshold=%u",
+                                     (unsigned long)stack_min, (unsigned)CAMERA_STACK_WARN_BYTES);
                         pending[0] = '\0';
                     }
                 } else {
@@ -764,6 +940,7 @@ static void camera_task(void *arg)
                 }
                 camera_release(frame);
             } else {
+                vision_pilot_process_frame(NULL);
                 ++failed;
                 if (pending[0]) {
                     ESP_LOGE(TAG, "snapshot: captura invalida; solicitud descartada");
@@ -804,6 +981,7 @@ static void camera_task(void *arg)
                      (unsigned long)uptime_s, profile, (unsigned)frames_in_window,
                      (unsigned long)s_cal_frame_stats.accepted,
                      (unsigned long)cal_frame_rejected_total(&s_cal_frame_stats));
+            vision_pilot_health_log((uint32_t)uxTaskGetStackHighWaterMark(NULL));
             frames_in_window = 0;
         }
 
@@ -825,6 +1003,8 @@ static void camera_task(void *arg)
 esp_err_t camera_start_task(void)
 {
     if (camera_task_handle != NULL) return ESP_OK;
+    esp_err_t trial_err = vision_trial_init();
+    if (trial_err != ESP_OK) return trial_err;
     if (!s_snapshot_queue) {
         s_snapshot_queue = xQueueCreate(CAMERA_SNAPSHOT_QUEUE_LEN, CAMERA_REQ_ID_SIZE);
         if (!s_snapshot_queue) return ESP_ERR_NO_MEM;
