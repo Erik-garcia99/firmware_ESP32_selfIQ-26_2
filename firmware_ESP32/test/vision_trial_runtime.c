@@ -27,12 +27,28 @@ static unsigned binding_reads, storage_opens, revision_after_snapshot;
 static float roi_shift;
 static bool snapshot_failed;
 static unsigned roi_publications;
+static unsigned cam_moved_events;
 static bool queue_full;
 static bool production_fixture;
 static uint32_t fixture_version;
 static unsigned kernel_reads;
 static unsigned last_published_value;
 esp_err_t mqtt_queue_json(const char *type, const char *data) {
+    if (!strcmp(type, "cam_moved")) {
+        cJSON *root = cJSON_Parse(data);
+        assert(root);
+        cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "value");
+        assert(v && v->valueint == 1);
+        assert(cJSON_GetObjectItemCaseSensitive(root, "roi_id"));
+        assert(cJSON_GetObjectItemCaseSensitive(root, "config_version"));
+        assert(cJSON_GetObjectItemCaseSensitive(root, "calibration_version"));
+        assert(cJSON_GetObjectItemCaseSensitive(root, "streak"));
+        assert(cJSON_GetObjectItemCaseSensitive(root, "uptime_ms"));
+        cJSON_Delete(root);
+        if (queue_full) return ESP_ERR_NO_MEM;
+        ++cam_moved_events;
+        return ESP_OK;
+    }
     assert(!strcmp(type, "roi_occ"));
     cJSON *root = cJSON_Parse(data);
     assert(root);
@@ -341,7 +357,15 @@ static void reboot_ram(void) {
     }
     production_count = production_index = 0;
     using_production = false;
-    for (unsigned i = 0; i < PROD_MAX_ROI; ++i) median_reset(i);
+    for (unsigned i = 0; i < PROD_MAX_ROI; ++i) {
+        median_reset(i);
+        production_published_us[i] = production_attempt_us[i] = 0;
+        production_last_published_pct[i] = 0;
+        production_guard_fail_streak[i] = production_ok_streak[i] = 0;
+        production_cam_moved_active[i] = production_cam_moved_queued[i] = false;
+    }
+    production_published = production_queue_rejected = 0;
+    roi_publications = cam_moved_events = 0;
     free(pattern); free(guard); pattern = NULL; guard = NULL;
     stage = 0; attempted_load = false; memset(&header, 0, sizeof(header));
     memset(seen_req, 0, sizeof(seen_req)); seen_next = 0;
@@ -459,6 +483,102 @@ static void test_median_window(void) {
     median_reset(slot);
 }
 
+/* Fase 6 incremento 2: histeresis de publicacion y latido de 30 s. */
+static void test_publish_hysteresis(void) {
+    unsigned slot = 0;
+    median_reset(slot);
+    production_published_us[slot] = production_attempt_us[slot] = 0;
+    production_last_published_pct[slot] = 0;
+
+    /* Primera lectura tras cargar la referencia: siempre se publica. */
+    assert(production_should_publish(slot, 0, 1000000));
+    production_published_us[slot] = 1000000;
+    production_last_published_pct[slot] = 50;
+
+    /* Cambio de 3 puntos antes del latido: no publica. */
+    assert(!production_should_publish(slot, 53, 6000000));
+    assert(!production_should_publish(slot, 47, 6000000));
+
+    /* Cambio de 6 puntos: publica de inmediato. */
+    assert(production_should_publish(slot, 56, 6000000));
+    assert(production_should_publish(slot, 44, 6000000));
+
+    /* Sin cambios durante 30 s: publica el latido. */
+    assert(!production_should_publish(slot, 50, 1000000 + PROD_HEARTBEAT_US - 1));
+    assert(production_should_publish(slot, 50, 1000000 + PROD_HEARTBEAT_US));
+
+    /* Recargar la calibracion reinicia el estado: el primer valor vuelve a salir. */
+    median_reset(slot);
+    production_published_us[slot] = production_attempt_us[slot] = 0;
+    production_last_published_pct[slot] = 0;
+    assert(production_should_publish(slot, 0, 99000000));
+    median_reset(slot);
+}
+
+/* Regresión observada en placa: la guarda sana oscila 47-51/54 (87-94 %) en una
+ * calibración y 73-83/88 (83-94 %) en el soak v2 (cfg=70). El umbral único al
+ * 90 % y después la banda 85-92 % daban CAM_MOVED falsos cuando bajaba al
+ * 83-85 %. Con banda gris 75-80 % ni dispara en sano ni recupera con lecturas
+ * intermedias, y una guarda sana del 83 % sí cuenta para recuperar. */
+static void test_cam_moved_recovery_guard_pct(void) {
+    unsigned slot = 0;
+    median_reset(slot);
+    production_guard_fail_streak[slot] = production_ok_streak[slot] = 0;
+    production_cam_moved_active[slot] = production_cam_moved_queued[slot] = false;
+    production_published_us[slot] = production_attempt_us[slot] = 0;
+    production_last_published_pct[slot] = 0;
+    using_production = true;
+    strcpy(production_roi_id[slot], "20000000-0000-0000-0000-000000000001");
+    memset(&production_binding[slot], 0, sizeof(production_binding[slot]));
+    production_binding[slot].config_version = 1;
+    production_binding[slot].calibration_version = 1;
+
+    unsigned moved_before = cam_moved_events;
+    /* Guarda al 50 %: dispara tras 5 frames. */
+    for (unsigned i = 0; i < PROD_CAM_MOVED_FRAMES; ++i)
+        cam_moved_track(slot, 1000000 + i, VR_OK, 30, 60);
+    assert(production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 1);
+
+    /* Dos buenas y una mala NO recuperan. */
+    cam_moved_track(slot, 2000000, VR_OK, 60, 60);
+    cam_moved_track(slot, 2000001, VR_OK, 60, 60);
+    cam_moved_track(slot, 2000002, VR_OK, 30, 60);
+    assert(production_cam_moved_active[slot]);
+    /* Zona gris (77 %) tampoco cuenta como buena. */
+    cam_moved_track(slot, 2000003, VR_OK, 77, 100);
+    assert(production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 1);
+
+    /* Tres buenas (100 %) sí, sin reenviar el aviso. */
+    cam_moved_track(slot, 3000000, VR_OK, 60, 60);
+    cam_moved_track(slot, 3000001, VR_OK, 60, 60);
+    cam_moved_track(slot, 3000002, VR_OK, 60, 60);
+    assert(!production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 1);
+
+    /* La guarda sana real del soak NO dispara desde cero: 47/54 = 87 % con la
+     * primera calibración y 74/88 = 84 % con la del v2 (debajo del viejo 85). */
+    production_guard_fail_streak[slot] = 0;
+    for (unsigned i = 0; i < PROD_CAM_MOVED_FRAMES; ++i)
+        cam_moved_track(slot, 4000000 + i, VR_OK, 47, 54);
+    assert(!production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 1);
+    for (unsigned i = 0; i < PROD_CAM_MOVED_FRAMES; ++i)
+        cam_moved_track(slot, 5000000 + i, VR_OK, 74, 88);
+    assert(!production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 1);
+    /* Y una guarda sana al 83 % (73/88) sí recupera tras un episodio real. */
+    for (unsigned i = 0; i < PROD_CAM_MOVED_FRAMES; ++i)
+        cam_moved_track(slot, 1000000 + i, VR_OK, 30, 60);
+    assert(production_cam_moved_active[slot]);
+    for (unsigned i = 0; i < PROD_CAM_MOVED_RECOVERY; ++i)
+        cam_moved_track(slot, 6000000 + i, VR_OK, 73, 88);
+    assert(!production_cam_moved_active[slot]);
+    assert(cam_moved_events == moved_before + 2);
+    using_production = false;
+}
+
 int main(void) {
     strcpy(active.roi_id, "20000000-0000-0000-0000-000000000001");
     strcpy(active.calibration_id, "30000000-0000-0000-0000-000000000001");
@@ -467,6 +587,8 @@ int main(void) {
     active.has_empty = active.has_full = true;
     assert(vision_trial_init() == ESP_OK);
     test_median_window();
+    test_publish_hysteresis();
+    test_cam_moved_recovery_guard_pct();
     image(false, false);
     submit(1, 1, "empty", true); assert(stage == 0 && !frames);
     submit(2, 1, "sample", false); assert(!strcmp(last_status, "calibration_required"));
@@ -820,14 +942,14 @@ int main(void) {
     automatic_frame();
     assert(kernel_reads == kernel_after_load && roi_publications == 2);
     assert(production_index == 1);
-    clock_us += PROD_PUBLISH_US;
+    clock_us += PROD_HEARTBEAT_US;
     queue_full = true;
     automatic_frame();
     assert(roi_publications == 2 && production_queue_rejected);
     queue_full = false;
     automatic_frame();
     assert(roi_publications == 3);
-    clock_us += PROD_PUBLISH_US;
+    clock_us += PROD_HEARTBEAT_US;
     unsigned window_before_stale[PROD_MAX_ROI];
     for (unsigned i = 0; i < PROD_MAX_ROI; ++i)
         window_before_stale[i] = production_median_count[i];
@@ -861,7 +983,7 @@ int main(void) {
     assert(production_median_count[1] == PROD_MEDIAN_SAMPLES);
     assert(pilot_health.occupancy_smoothed_pct == 0);
     unsigned published_before_spike = roi_publications;
-    clock_us += PROD_PUBLISH_US;
+    clock_us += PROD_HEARTBEAT_US;
     image(true, false);
     unsigned spikes = 0;
     for (unsigned i = 0; i < 2; ++i) {
@@ -874,6 +996,42 @@ int main(void) {
     }
     assert(spikes == 1); /* solo la ROI que cubre la imagen llena mide 100 */
     assert(roi_publications > published_before_spike);
+
+    /* Fase 6 incremento 3: 5 rechazos de fondo consecutivos -> un solo
+     * cam_moved, sin publicar value mientras la ROI esté marcada como movida. */
+    production_fixture = false;
+    extra_roi = false;
+    reboot_ram();
+    production_fixture = true;
+    fixture_version = active.calibration_version;
+    image(false, false);
+    automatic_frame();
+    assert(using_production && production_count == 1);
+    for (unsigned i = 0; i < PROD_MEDIAN_SAMPLES; ++i) automatic_frame();
+    clock_us += PROD_HEARTBEAT_US;
+    unsigned pubs_before_move = roi_publications;
+    unsigned moved_before = cam_moved_events;
+    flatten_guard(prod_guard[0], prod_guard[0]->count - prod_guard[0]->count / 5);
+    /* Un rechazo de frame en medio rompe la racha: no dispara. */
+    stale = true;
+    automatic_frame();
+    stale = false;
+    for (unsigned i = 0; i < PROD_CAM_MOVED_FRAMES - 1U; ++i) automatic_frame();
+    assert(cam_moved_events == moved_before);
+    automatic_frame();
+    assert(cam_moved_events == moved_before + 1);
+    assert(roi_publications == pubs_before_move);
+    /* Insistir no reenvía el aviso ni publica porcentaje. */
+    for (unsigned i = 0; i < 3U; ++i) automatic_frame();
+    assert(cam_moved_events == moved_before + 1);
+    assert(roi_publications == pubs_before_move);
+    /* Recuperación: 3 VR_OK limpian el estado y se reanuda la publicación. */
+    image(false, false);
+    for (unsigned i = 0; i < PROD_CAM_MOVED_RECOVERY + 1U; ++i) automatic_frame();
+    assert(!production_cam_moved_active[0]);
+    assert(cam_moved_events == moved_before + 1);
+    assert(roi_publications > pubs_before_move);
+
     production_fixture = false;
     extra_roi = false;
     reboot_ram();

@@ -65,7 +65,23 @@ static int64_t pilot_load_checked_us;
 /* Referencia de produccion (pareja de la app + kernel por ROI). El slot
  * experimental (selfiq_vexp) queda solo para diagnostico. */
 #define PROD_MAX_ROI 2U
-#define PROD_PUBLISH_US 10000000LL
+/* Fase 6 incremento 2: publicar por cambio de mediana o por latido. El latido
+ * de 30 s deja margen frente al umbral `stale` de 60 s de la API. */
+#define PROD_PUBLISH_DELTA 5U
+#define PROD_HEARTBEAT_US 30000000LL
+/* Fase 6 incremento 3: cámara movida tras N rechazos de fondo consecutivos;
+ * se reanuda tras M mediciones válidas consecutivas. */
+#define PROD_CAM_MOVED_FRAMES 5U
+#define PROD_CAM_MOVED_RECOVERY 3U
+/* Histeresis de guarda. En sano se observo 47-51/54 (87-94 %) con la primera
+ * calibracion y 73-83/88 (83-94 %) en el soak v2 (cfg=70); movida: 28-34/54
+ * (52-63 %). Un unico umbral al 90 % y luego la banda 85-92 % seguian
+ * disparando con guarda sana al 83-85 % (CAM_MOVED falso a uptime=263 s).
+ * Banda gris 75-80 %: 8 puntos por debajo del minimo sano observado y 12 por
+ * encima del maximo movido documentado. Asi la lectura normal no dispara y la
+ * movida si, y una guarda sana de 83 % si cuenta para recuperar. */
+#define PROD_CAM_MOVED_DETECT_PCT 75U
+#define PROD_CAM_MOVED_RECOVER_PCT 80U
 /* Fase 6: mediana de las ultimas N mediciones validas por ROI. Filtra el ruido
  * de +/-5 puntos del valor instantaneo. La ventana se reinicia al recargar la
  * referencia (calibracion nueva) y NO conserva lecturas ante rechazos: si el
@@ -76,6 +92,11 @@ static uint8_t production_median_count[PROD_MAX_ROI];
 static uint8_t production_median_next[PROD_MAX_ROI];
 static int64_t production_published_us[PROD_MAX_ROI];
 static int64_t production_attempt_us[PROD_MAX_ROI];
+static uint8_t production_last_published_pct[PROD_MAX_ROI];
+static uint8_t production_guard_fail_streak[PROD_MAX_ROI];
+static uint8_t production_ok_streak[PROD_MAX_ROI];
+static bool production_cam_moved_active[PROD_MAX_ROI];
+static bool production_cam_moved_queued[PROD_MAX_ROI];
 static uint32_t production_published, production_queue_rejected;
 static bool using_production;
 static unsigned production_count;
@@ -686,6 +707,77 @@ static uint8_t median_push(unsigned slot, uint8_t value) {
     return (uint8_t)((sorted[count / 2U - 1U] + sorted[count / 2U]) / 2U);
 }
 
+/* Fase 6 incremento 2: publicar si la mediana cambio lo bastante o si vencio
+ * el latido. El primer valor tras cargar la referencia siempre se publica. */
+static bool production_should_publish(unsigned slot, uint8_t pct, int64_t now) {
+    if (slot >= PROD_MAX_ROI) return false;
+    if (!production_published_us[slot]) return true;
+    int delta = (int)pct - (int)production_last_published_pct[slot];
+    if (delta < 0) delta = -delta;
+    return (unsigned)delta >= PROD_PUBLISH_DELTA ||
+           now - production_published_us[slot] >= PROD_HEARTBEAT_US;
+}
+
+/* Fase 6 incremento 3: un solo aviso cam_moved por episodio, con reintento
+ * si la cola estaba llena. Siempre lleva un value numérico para que el
+ * adaptador Influx del gateway lo archive como serie propia sin cuarentena. */
+static void cam_moved_send_if_needed(unsigned slot, int64_t now) {
+    if (!production_cam_moved_active[slot] || production_cam_moved_queued[slot]) return;
+    char data[192];
+    int n = snprintf(data, sizeof(data),
+        "{\"value\":1,\"roi_id\":\"%s\",\"config_version\":%lu,"
+        "\"calibration_version\":%lu,\"streak\":%u,\"uptime_ms\":%llu}",
+        production_roi_id[slot],
+        (unsigned long)production_binding[slot].config_version,
+        (unsigned long)production_binding[slot].calibration_version,
+        (unsigned)production_guard_fail_streak[slot],
+        (unsigned long long)(now / 1000));
+    if (n > 0 && (size_t)n < sizeof(data) &&
+        mqtt_queue_json("cam_moved", data) == ESP_OK) {
+        production_cam_moved_queued[slot] = true;
+        ESP_LOGI(TAG, "CAM_MOVED: roi=%s cfg=%lu cal=%lu streak=%u uptime_ms=%llu",
+                 production_roi_id[slot],
+                 (unsigned long)production_binding[slot].config_version,
+                 (unsigned long)production_binding[slot].calibration_version,
+                 (unsigned)production_guard_fail_streak[slot],
+                 (unsigned long long)(now / 1000));
+    }
+}
+
+static void cam_moved_track(unsigned slot, int64_t now, vr_status_t status,
+                            uint32_t matched, uint32_t informative) {
+    if (!using_production || slot >= PROD_MAX_ROI) return;
+    if (status != VR_OK && status != VR_BACKGROUND) {
+        /* Otros rechazos (frame/contexto/luz) rompen la racha: no la cuentan. */
+        production_guard_fail_streak[slot] = 0;
+        production_ok_streak[slot] = 0;
+    } else {
+        /* Histeresis: por debajo de DETECT cuenta como movida; por encima de
+         * RECOVER cuenta como sana; la banda intermedia no cuenta (evita el
+         * parpadeo observado en el soak con guarda 47-51/54). */
+        uint64_t pct = informative == 0 ? 100U :
+            (uint64_t)matched * 100U / informative;
+        if (status == VR_BACKGROUND || pct < PROD_CAM_MOVED_DETECT_PCT) {
+            if (production_guard_fail_streak[slot] < 255U) ++production_guard_fail_streak[slot];
+            production_ok_streak[slot] = 0;
+            if (!production_cam_moved_active[slot] &&
+                production_guard_fail_streak[slot] >= PROD_CAM_MOVED_FRAMES) {
+                production_cam_moved_active[slot] = true;
+                production_cam_moved_queued[slot] = false;
+            }
+        } else if (pct >= PROD_CAM_MOVED_RECOVER_PCT) {
+            production_guard_fail_streak[slot] = 0;
+            if (production_cam_moved_active[slot] &&
+                ++production_ok_streak[slot] >= PROD_CAM_MOVED_RECOVERY) {
+                production_cam_moved_active[slot] = false;
+                production_cam_moved_queued[slot] = false;
+                production_ok_streak[slot] = 0;
+            }
+        }
+    }
+    cam_moved_send_if_needed(slot, now);
+}
+
 static bool pilot_load_production(void) {
     roi_blob_t snapshot;
     if (!roi_store_snapshot(&snapshot) || !snapshot.count) return false;
@@ -764,6 +856,9 @@ static bool pilot_load_production(void) {
         prod_pattern[slot] = pat;
         prod_guard[slot] = grd;
         production_published_us[slot] = production_attempt_us[slot] = 0;
+        production_last_published_pct[slot] = 0;
+        production_guard_fail_streak[slot] = production_ok_streak[slot] = 0;
+        production_cam_moved_active[slot] = production_cam_moved_queued[slot] = false;
         free(tiles);
     }
     if (production_count == 0) return false;
@@ -902,8 +997,12 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         pilot_health.clipping_rejected += status == VR_CLIPPING;
         pilot_health.background_rejected += status == VR_BACKGROUND;
         pilot_health.weak_rejected += status == VR_WEAK_REFERENCE;
+        if (using_production)
+            cam_moved_track(slot, now, status, result.matched, result.informative);
         return;
     }
+    if (using_production)
+        cam_moved_track(slot, now, VR_OK, result.matched, result.informative);
     ++pilot_health.accepted;
     pilot_health.guard_warn += result.guard_warn ? 1U : 0U;
     pilot_health.valid = true;
@@ -919,11 +1018,11 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
     pilot_health.relative_unclamped_q8 = result.value.relative_unclamped_q8;
     pilot_health.captured_us = input.captured_us;
     /* Only production results can enter the durable-receipt MQTT queue.
-     * One event/ROI/10 s; retry a full queue at most once/second.
+     * Fase 6: solo si la mediana cambio >= delta o vencio el latido de 30 s;
+     * retry a full queue at most once/second.
      * Never reuse a previous percentage on frame/context rejection. */
-    if (using_production &&
-        (!production_published_us[slot] ||
-         now - production_published_us[slot] >= PROD_PUBLISH_US) &&
+    if (using_production && !production_cam_moved_active[slot] &&
+        production_should_publish(slot, pilot_health.occupancy_smoothed_pct, now) &&
         (!production_attempt_us[slot] ||
          now - production_attempt_us[slot] >= 1000000)) {
         uint8_t published = pilot_health.occupancy_smoothed_pct;
@@ -939,6 +1038,7 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         if (n > 0 && (size_t)n < sizeof(data) &&
             mqtt_queue_json("roi_occ", data) == ESP_OK) {
             production_published_us[slot] = now;
+            production_last_published_pct[slot] = published;
             ++production_published;
             ESP_LOGI(TAG, "ROI_OCC_QUEUED: roi=%s cfg=%lu cal=%lu pct=%u "
                      "raw=%u samples=%u",
