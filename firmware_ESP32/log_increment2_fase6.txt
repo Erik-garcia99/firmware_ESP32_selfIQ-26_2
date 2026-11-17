@@ -1,0 +1,313 @@
+Executing action: all (aliases: build)
+Running ninja in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build
+Executing "ninja all"...
+[1/4] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/partition_table/partition-table.bin /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.bin
+firmware_ESP32.bin binary size 0x12d290 bytes. Smallest app partition is 0x177000 bytes. 0x49d70 bytes (20%) free.
+[2/4] Performing build step for 'bootloader'
+[1/1] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.bin
+Bootloader binary size 0x65f0 bytes. 0xa10 bytes (9%) free.
+[3/4] No install step for 'bootloader'
+[4/4] Completed 'bootloader'
+Executing action: flash
+Running ninja in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build
+Executing "ninja flash"...
+[1/5] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/partition_table/partition-table.bin /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.bin
+firmware_ESP32.bin binary size 0x12d290 bytes. Smallest app partition is 0x177000 bytes. 0x49d70 bytes (20%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.bin
+Bootloader binary size 0x65f0 bytes. 0xa10 bytes (9%) free.
+[3/5] No install step for 'bootloader'
+[4/5] Completed 'bootloader'
+[4/5] Running utility command for flash
+esptool --chip esp32 -p /dev/ttyUSB0 -b 460800 --before=default-reset --after=hard-reset write-flash --flash-mode dio --flash-freq 40m --flash-size 4MB 0x1000 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0x10000 firmware_ESP32.bin
+esptool v5.3.0
+Serial port /dev/ttyUSB0:
+Connecting.....
+Connected to ESP32 on /dev/ttyUSB0:
+Chip type:          ESP32-D0WD-V3 (revision v3.1)
+Features:           Wi-Fi, BT, Dual Core + LP Core, 240MHz, Vref calibration in eFuse, Coding Scheme None
+Crystal frequency:  40MHz
+MAC:                28:05:a5:25:35:c8
+
+Uploading stub flasher...
+Running stub flasher...
+Stub flasher running.
+Changing baud rate to 460800...
+Changed.
+
+Configuring flash size...
+
+Writing 'bootloader/bootloader.bin' at 0x00001000...
+SHA digest in image updated.
+Flash will be erased from 0x00001000 to 0x00007fff...
+Compressed 26096 bytes to 16544...
+Writing at 0x00001000 [                              ]   0.0% 0/16544 bytes... 
+Writing at 0x00007521 [============================> ]  99.0% 16384/16544 bytes... 
+Writing at 0x000075f0 [==============================] 100.0% 16544/16544 bytes... 
+Wrote 26096 bytes (16544 compressed) at 0x00001000 in 0.7 seconds (290.3 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'partition_table/partition-table.bin' at 0x00008000...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Compressed 3072 bytes to 105...
+Writing at 0x00008000 [                              ]   0.0% 0/105 bytes... 
+Writing at 0x00008c00 [==============================] 100.0% 105/105 bytes... 
+Wrote 3072 bytes (105 compressed) at 0x00008000 in 0.0 seconds (577.1 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'firmware_ESP32.bin' at 0x00010000...
+Flash will be erased from 0x00010000 to 0x0013dfff...
+Compressed 1233552 bytes to 768992...
+Writing at 0x00010000 [                              ]   0.0% 0/768992 bytes... 
+Writing at 0x0001ef5d [                              ]   2.1% 16384/768992 bytes... 
+Writing at 0x0002c176 [>                             ]   4.3% 32768/768992 bytes... 
+Writing at 0x000348f0 [>                             ]   6.4% 49152/768992 bytes... 
+Writing at 0x0003b790 [=>                            ]   8.5% 65536/768992 bytes... 
+Writing at 0x00043b6a [==>                           ]  10.7% 81920/768992 bytes... 
+Writing at 0x00049a4e [==>                           ]  12.8% 98304/768992 bytes... 
+Writing at 0x000501fc [===>                          ]  14.9% 114688/768992 bytes... 
+Writing at 0x00055ab5 [====>                         ]  17.0% 131072/768992 bytes... 
+Writing at 0x0005b367 [====>                         ]  19.2% 147456/768992 bytes... 
+Writing at 0x00060d3e [=====>                        ]  21.3% 163840/768992 bytes... 
+Writing at 0x000669b8 [======>                       ]  23.4% 180224/768992 bytes... 
+Writing at 0x0006c9e7 [======>                       ]  25.6% 196608/768992 bytes... 
+Writing at 0x00074883 [=======>                      ]  27.7% 212992/768992 bytes... 
+Writing at 0x0007bbb8 [=======>                      ]  29.8% 229376/768992 bytes... 
+Writing at 0x00082086 [========>                     ]  32.0% 245760/768992 bytes... 
+Writing at 0x00087cbb [=========>                    ]  34.1% 262144/768992 bytes... 
+Writing at 0x0008def2 [=========>                    ]  36.2% 278528/768992 bytes... 
+Writing at 0x00093e7d [==========>                   ]  38.4% 294912/768992 bytes... 
+Writing at 0x00099e77 [===========>                  ]  40.5% 311296/768992 bytes... 
+Writing at 0x000a0559 [===========>                  ]  42.6% 327680/768992 bytes... 
+Writing at 0x000a609d [============>                 ]  44.7% 344064/768992 bytes... 
+Writing at 0x000ab23b [=============>                ]  46.9% 360448/768992 bytes... 
+Writing at 0x000b090e [=============>                ]  49.0% 376832/768992 bytes... 
+Writing at 0x000b6039 [==============>               ]  51.1% 393216/768992 bytes... 
+Writing at 0x000bbfd6 [==============>               ]  53.3% 409600/768992 bytes... 
+Writing at 0x000c17d5 [===============>              ]  55.4% 425984/768992 bytes... 
+Writing at 0x000c6dde [================>             ]  57.5% 442368/768992 bytes... 
+Writing at 0x000cc83e [================>             ]  59.7% 458752/768992 bytes... 
+Writing at 0x000d1e60 [=================>            ]  61.8% 475136/768992 bytes... 
+Writing at 0x000d72d8 [==================>           ]  63.9% 491520/768992 bytes... 
+Writing at 0x000dd094 [==================>           ]  66.0% 507904/768992 bytes... 
+Writing at 0x000e2c22 [===================>          ]  68.2% 524288/768992 bytes... 
+Writing at 0x000e83e5 [====================>         ]  70.3% 540672/768992 bytes... 
+Writing at 0x000edd0b [====================>         ]  72.4% 557056/768992 bytes... 
+Writing at 0x000f39e8 [=====================>        ]  74.6% 573440/768992 bytes... 
+Writing at 0x000f971e [======================>       ]  76.7% 589824/768992 bytes... 
+Writing at 0x000ff4ac [======================>       ]  78.8% 606208/768992 bytes... 
+Writing at 0x0010541d [=======================>      ]  81.0% 622592/768992 bytes... 
+Writing at 0x0010ad99 [=======================>      ]  83.1% 638976/768992 bytes... 
+Writing at 0x001118e3 [========================>     ]  85.2% 655360/768992 bytes... 
+Writing at 0x00117642 [=========================>    ]  87.4% 671744/768992 bytes... 
+Writing at 0x0011f43e [=========================>    ]  89.5% 688128/768992 bytes... 
+Writing at 0x001263a4 [==========================>   ]  91.6% 704512/768992 bytes... 
+Writing at 0x0012c413 [===========================>  ]  93.7% 720896/768992 bytes... 
+Writing at 0x001328bb [===========================>  ]  95.9% 737280/768992 bytes... 
+Writing at 0x00137bf5 [============================> ]  98.0% 753664/768992 bytes... 
+Writing at 0x0013d290 [==============================] 100.0% 768992/768992 bytes... 
+Wrote 1233552 bytes (768992 compressed) at 0x00010000 in 19.0 seconds (519.3 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Hard resetting via RTS pin...
+Executing action: monitor
+Running idf_monitor in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32
+Executing "/home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/tools/idf_monitor.py -p /dev/ttyUSB0 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.elf /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.elf -m '/home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python' '/opt/esp-idf/tools/idf.py' '-p' '/dev/ttyUSB0'"...
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0040,len:6272
+load:0x40078000,len:15820
+load:0x40080400,len:3920
+entry 0x40080644
+[0;32mI (27) boot: ESP-IDF v6.0.2 2nd stage bootloader[0m
+[0;32mI (27) boot: compile time Nov  2 2026 14:59:01[0m
+[0;32mI (28) boot: Multicore bootloader[0m
+[0;32mI (29) boot: chip revision: v3.1[0m
+[0;32mI (32) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (35) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (39) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (49) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (69) boot:  2 factory          factory app      00 00 00010000 00177000[0m
+[0;32mI (75) boot: End of partition table[0m
+[0;32mI (79) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=2fc20h (195616) map[0m
+[0;32mI (156) esp_image: segment 1: paddr=0003fc48 vaddr=3ffb0000 size=003d0h (   976) load[0m
+[0;32mI (157) esp_image: segment 2: paddr=00040020 vaddr=400d0020 size=dc4f4h (902388) map[0m
+[0;32mI (481) esp_image: segment 3: paddr=0011c51c vaddr=3ffb03d0 size=06bf4h ( 27636) load[0m
+[0;32mI (492) esp_image: segment 4: paddr=00123118 vaddr=40080000 size=1a118h (106776) load[0m
+[0;32mI (536) esp_image: segment 5: paddr=0013d238 vaddr=50000000 size=00028h (    40) load[0m
+[0;32mI (550) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (550) boot: Disabling RNG early entropy source...[0m
+[0;32mI (561) quad_psram: This chip is ESP32-D0WD[0m
+[0;32mI (562) esp_psram: Found 8MB PSRAM device[0m
+[0;32mI (562) esp_psram: Speed: 40MHz[0m
+[0;32mI (563) esp_psram: PSRAM initialized, cache is in low/high (2-core) mode.[0m
+[0;33mW (568) esp_psram: Virtual address not enough for PSRAM, map as much as we can. 4MB is mapped[0m
+[0;32mI (576) cpu_start: Multicore app[0m
+[0;32mI (1484) esp_psram: SPI SRAM memory test OK[0m
+[0;32mI (1492) cpu_start: GPIO 3 and 1 are used as console UART I/O pins[0m
+[0;32mI (1492) cpu_start: Pro cpu start user code[0m
+[0;32mI (1492) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (1495) app_init: Application information:[0m
+[0;32mI (1498) app_init: Project name:     firmware_ESP32[0m
+[0;32mI (1503) app_init: App version:      b9809b7[0m
+[0;32mI (1507) app_init: Compile time:     Nov 16 2026 20:29:18[0m
+[0;32mI (1512) app_init: ELF file SHA256:  b853e33d8...[0m
+[0;32mI (1517) app_init: ESP-IDF:          v6.0.2[0m
+[0;32mI (1520) efuse_init: Min chip rev:     v0.0[0m
+[0;32mI (1524) efuse_init: Max chip rev:     v3.99 [0m
+[0;32mI (1528) efuse_init: Chip rev:         v3.1[0m
+[0;32mI (1533) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (1539) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (1544) heap_init: At 3FFC3588 len 0001CA78 (114 KiB): DRAM[0m
+[0;32mI (1549) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (1555) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (1560) heap_init: At 4009A118 len 00005EE8 (23 KiB): IRAM[0m
+[0;32mI (1566) esp_psram: Adding pool of 4096K of PSRAM memory to heap allocator[0m
+[0;33mW (1573) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig[0m
+[0;32mI (1586) spi_flash: detected chip: generic[0m
+[0;32mI (1589) spi_flash: flash io: dio[0m
+[0;32mI (1594) main_task: Started on CPU0[0m
+[0;32mI (1594) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations[0m
+[0;32mI (1594) main_task: Calling app_main()[0m
+[0;32mI (1654) SELFIQ_ROI: ROI: count=1 version=49 crc=OK[0m
+[0;32mI (1654) SELFIQ_CAL_STORE: NVS lista: banco doble, descriptor 8x8, version=1[0m
+[0;32mI (1654) MAIN: [CAL] almacenamiento v1 preparado; no hay capturas automáticas[0m
+[0;32mI (1664) SELFIQ_NVS: ========== ESTADISTICAS NVS ==========[0m
+[0;32mI (1664) SELFIQ_NVS: Entradas totales: 756[0m
+[0;32mI (1674) SELFIQ_NVS: Entradas utilizadas: 501[0m
+[0;32mI (1674) SELFIQ_NVS: Entradas libres: 255[0m
+[0;32mI (1674) SELFIQ_NVS: Namespaces: 8[0m
+[0;32mI (1684) SELFIQ_NVS: =====================================[0m
+[0;32mI (1704) wifi:wifi driver task: 3ffcb0f0, prio:23, stack:6656, core=0[0m
+[0;32mI (1714) wifi:wifi firmware version: 00ad238[0m
+[0;32mI (1714) wifi:wifi certification version: v7.0[0m
+[0;32mI (1714) wifi:config NVS flash: enabled[0m
+[0;32mI (1714) wifi:config nano formatting: disabled[0m
+[0;32mI (1724) wifi:Init data frame dynamic rx buffer num: 32[0m
+[0;32mI (1724) wifi:Init static rx mgmt buffer num: 5[0m
+[0;32mI (1734) wifi:Init management short buffer num: 32[0m
+[0;32mI (1734) wifi:Init dynamic tx buffer num: 32[0m
+[0;32mI (1734) wifi:Init static rx buffer size: 1600[0m
+[0;32mI (1744) wifi:Init static rx buffer num: 10[0m
+[0;32mI (1744) wifi:Init dynamic rx buffer num: 32[0m
+[0;32mI (1754) wifi_init: rx ba win: 6[0m
+[0;32mI (1754) wifi_init: accept mbox: 6[0m
+[0;32mI (1754) wifi_init: tcpip mbox: 32[0m
+[0;32mI (1764) wifi_init: udp mbox: 6[0m
+[0;32mI (1764) wifi_init: tcp mbox: 6[0m
+[0;32mI (1764) wifi_init: tcp tx win: 5760[0m
+[0;32mI (1764) wifi_init: tcp rx win: 5760[0m
+[0;32mI (1774) wifi_init: tcp mss: 1440[0m
+[0;32mI (1774) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (1774) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;32mI (1784) phy_init: phy_version 4863,a3a4459,Oct 28 2025,14:30:06[0m
+[0;32mI (1864) wifi:mode : sta (28:05:a5:25:35:c8)[0m
+[0;32mI (1864) wifi:enable tsf[0m
+[0;32mI (1864) VISION_TRIAL: E4_ROI_OCC_V1: max_roi=2 period_ms=10000; production-only telemetry; experimental diagnostics isolated[0m
+[0;33mW (1864) MAIN: [NETWORK] ronda 1/4, hasta 5 intentos[0m
+[0;32mI (1874) cam_hal: cam init ok[0m
+[0;32mI (1874) sccb-ng: pin_sda 26 pin_scl 27[0m
+[0;32mI (1874) sccb-ng: sccb_i2c_port=1[0m
+[0;32mI (1884) wifi_lib: [NETWORK] credenciales cargadas; conectando a 'INFINITUMF4AF'[0m
+[0;32mI (1914) ov3640: Mismatch PID=0x3660[0m
+[0;32mI (1914) camera: Camera PID=0x3660 VER=0x00 MIDL=0x00 MIDH=0x00[0m
+[0;32mI (1914) camera: Detected OV3660 camera[0m
+[0;32mI (1914) camera: Detected camera at address=0x3c[0m
+[0;32mI (2254) cam_hal: PSRAM DMA mode disabled[0m
+[0;32mI (2254) esp32 ll_cam: node_size: 2560, nodes_per_line: 1, lines_per_node: 1, dma_half_buffer_min:  2560, dma_half_buffer: 15360,lines_per_half_buffer:  6, dma_buffer_size: 30720, image_size: 307200[0m
+[0;32mI (2264) cam_hal: buffer_size: 30720, half_buffer_size: 15360, node_buffer_size: 2560, node_cnt: 12, total_cnt: 20[0m
+[0;32mI (2274) cam_hal: Allocating 307200 Byte frame buffer in PSRAM[0m
+[0;32mI (2274) cam_hal: Allocating 307200 Byte frame buffer in PSRAM[0m
+[0;32mI (2284) cam_hal: cam config ok[0m
+[0;32mI (2304) ov3660: Calculated VCO: 80000000 Hz, PLLCLK: 40000000 Hz, SYSCLK: 10000000 Hz, PCLK: 10000000 Hz[0m
+[0;32mI (2324) SELFIQ_CAMERA: Camara inicializada: PID=0x3660 (OV3660), PSRAM=si[0m
+[0;32mI (2324) SELFIQ_CAMERA: CAPTURE_STARTED: intervalo=1000 ms; grises 640x480, 2 buffers PSRAM[0m
+cam_hal: EV-EOF-OVF
+[0;32mI (2984) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=550420 ok=1 fail=0 heap=132555[0m
+[0;32mI (4904) wifi:new:<11,0>, old:<1,0>, ap:<255,255>, sta:<11,0>, prof:1, snd_ch_cfg:0x0[0m
+[0;32mI (4914) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (4914) wifi:state: auth -> assoc (0x0)[0m
+[0;32mI (4924) wifi:state: assoc -> run (0x10)[0m
+[0;32mI (4944) wifi:state: run -> init (0x2a0)[0m
+[0;33mW (4944) wifi_lib: [NETWORK] intento 2/5 reason=2[0m
+[0;32mI (7274) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (7294) wifi:state: auth -> assoc (0x0)[0m
+[0;32mI (7304) wifi:state: assoc -> run (0x10)[0m
+[0;32mI (7344) wifi:connected with INFINITUMF4AF, aid = 46, channel 11, BW20, bssid = d8:6d:17:90:8f:48[0m
+[0;32mI (7344) wifi:security: WPA2-PSK, phy: bgn, rssi: -62, cipher(pairwise:0x3, group:0x3), pmf:0[0m
+[0;32mI (7354) wifi:pm start, type: 1[0m
+
+[0;32mI (7354) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us[0m
+[0;32mI (7434) wifi:AP's beacon interval = 102400 us, DTIM period = 1[0m
+[0;32mI (10534) esp_netif_handlers: sta ip: 192.168.1.101, mask: 255.255.255.0, gw: 192.168.1.254[0m
+[0;32mI (10534) wifi_lib: [NETWORK] WIFI_READY IP=192.168.1.101[0m
+[0;32mI (10674) selfiq_mqtt: Identidad NVS lista para operacion local[0m
+[0;32mI (10674) selfiq_mqtt: [CAL] worker stack_min_free=7884 bytes budget=8192[0m
+[0;32mI (10674) selfiq_mqtt: [MQTT] broker=mqtt://192.168.1.98:1883; identidad y cola RAM conservadas[0m
+[0;32mI (10744) selfiq_mqtt: ESP32 registrada: MAC=28:05:A5:25:35:C8 ID=5c485efa-cc20-4f9a-91eb-ceeba0f99289 SUCURSAL=d07018c7-99c1-490f-95b9-dd54589cf60b[0m
+[0;32mI (10754) wifi:<ba-add>idx:0 (ifx:0, d8:6d:17:90:8f:48), tid:0, ssn:5, winSize:64[0m
+[0;32mI (10754) selfiq_mqtt: MQTT conectado; esperando suscripcion de respuesta (msg_id=9612)[0m
+[0;32mI (10774) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=15956)[0m
+[0;32mI (10784) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=65098)[0m
+[0;32mI (10944) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=40609)[0m
+[0;32mI (10954) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=9612)[0m
+[0;32mI (11334) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=85 ok=10 fail=0 heap=107391[0m
+[0;32mI (12384) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=97 raw=96 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (21384) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=17 ok=20 fail=0 heap=107391[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (25944) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (31374) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=25 ok=30 fail=0 heap=107255[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (41374) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=129 ok=40 fail=0 heap=107255[0m
+[0;32mI (43384) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=97 raw=97 samples=5[0m
+[0;32mI (45224) wifi:<ba-add>idx:1 (ifx:0, d8:6d:17:90:8f:48), tid:6, ssn:5, winSize:64[0m
+[0;32mI (51374) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=50 fail=0 heap=107171[0m
+[0;32mI (55944) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (61384) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=14 ok=60 fail=0 heap=107171[0m
+[0;32mI (62374) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107171 fails=0 uptime=60s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (62374) VISION_TRIAL: E3_PILOT: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 status=ok valid=1 pct=97 smooth=97 samples=5 raw_q8=24934 guard=54/54 guard_warn=0 frames=61 accepted=50 rejected=11 frame_rej=11 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=32947 max_us=99997 stack_min=3044 source=prod publication=prod_only queued=2 queue_rej=5[0m
+[0;32mI (70754) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (70784) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (70794) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (70794) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (70804) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (71374) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=77 ok=70 fail=0 heap=107171[0m
+[0;32mI (73394) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=97 raw=97 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+[0;32mI (81394) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=60 ok=80 fail=0 heap=107171[0m
+[0;32mI (82384) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=73 raw=73 samples=5[0m
+[0;32mI (85944) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (85954) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (91384) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=27 ok=90 fail=0 heap=107171[0m
+[0;32mI (101384) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=76 ok=100 fail=0 heap=107171[0m
+[0;32mI (111394) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=19 ok=110 fail=0 heap=107171[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (113384) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=73 raw=73 samples=5[0m
+[0;32mI (115954) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (121604) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=221795 ok=120 fail=0 heap=107171[0m
+[0;32mI (122384) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107171 fails=0 uptime=120s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (122384) VISION_TRIAL: E3_PILOT: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 status=ok valid=1 pct=73 smooth=73 samples=5 raw_q8=18806 guard=54/54 guard_warn=0 frames=121 accepted=97 rejected=24 frame_rej=24 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=44658 max_us=99997 stack_min=3044 source=prod publication=prod_only queued=5 queue_rej=5[0m
+[0;32mI (130374) VISION_TRIAL: ROI_OCC_QUEUED: roi=7079a0b6-5e8c-418b-a537-770e9ad8b201 cfg=49 cal=1 pct=100 raw=100 samples=5[0m
+[0;32mI (130864) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130874) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130884) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130894) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130904) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130914) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (131384) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=141 ok=130 fail=0 heap=107191[0m
+[0;32mI (141374) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=140 fail=0 heap=107191[0m
+Done

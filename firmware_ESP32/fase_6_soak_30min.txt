@@ -1,0 +1,1026 @@
+Executing action: all (aliases: build)
+Running ninja in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build
+Executing "ninja all"...
+[1/4] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/partition_table/partition-table.bin /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.bin
+firmware_ESP32.bin binary size 0x12d5e0 bytes. Smallest app partition is 0x177000 bytes. 0x49a20 bytes (20%) free.
+[2/4] Performing build step for 'bootloader'
+[1/1] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.bin
+Bootloader binary size 0x65f0 bytes. 0xa10 bytes (9%) free.
+[3/4] No install step for 'bootloader'
+[4/4] Completed 'bootloader'
+Executing action: flash
+Running ninja in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build
+Executing "ninja flash"...
+[1/5] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/partition_table/partition-table.bin /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.bin
+firmware_ESP32.bin binary size 0x12d5e0 bytes. Smallest app partition is 0x177000 bytes. 0x49a20 bytes (20%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader && /home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.bin
+Bootloader binary size 0x65f0 bytes. 0xa10 bytes (9%) free.
+[3/5] No install step for 'bootloader'
+[4/5] Completed 'bootloader'
+[4/5] Running utility command for flash
+esptool --chip esp32 -p /dev/ttyUSB0 -b 460800 --before=default-reset --after=hard-reset write-flash --flash-mode dio --flash-freq 40m --flash-size 4MB 0x1000 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0x10000 firmware_ESP32.bin
+esptool v5.3.0
+Serial port /dev/ttyUSB0:
+Connecting....
+Connected to ESP32 on /dev/ttyUSB0:
+Chip type:          ESP32-D0WD-V3 (revision v3.1)
+Features:           Wi-Fi, BT, Dual Core + LP Core, 240MHz, Vref calibration in eFuse, Coding Scheme None
+Crystal frequency:  40MHz
+MAC:                28:05:a5:25:35:c8
+
+Uploading stub flasher...
+Running stub flasher...
+Stub flasher running.
+Changing baud rate to 460800...
+Changed.
+
+Configuring flash size...
+
+Writing 'bootloader/bootloader.bin' at 0x00001000...
+SHA digest in image updated.
+Flash will be erased from 0x00001000 to 0x00007fff...
+Compressed 26096 bytes to 16544...
+Writing at 0x00001000 [                              ]   0.0% 0/16544 bytes... 
+Writing at 0x00007521 [============================> ]  99.0% 16384/16544 bytes... 
+Writing at 0x000075f0 [==============================] 100.0% 16544/16544 bytes... 
+Wrote 26096 bytes (16544 compressed) at 0x00001000 in 0.7 seconds (290.7 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'partition_table/partition-table.bin' at 0x00008000...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Compressed 3072 bytes to 105...
+Writing at 0x00008000 [                              ]   0.0% 0/105 bytes... 
+Writing at 0x00008c00 [==============================] 100.0% 105/105 bytes... 
+Wrote 3072 bytes (105 compressed) at 0x00008000 in 0.0 seconds (538.1 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'firmware_ESP32.bin' at 0x00010000...
+Flash will be erased from 0x00010000 to 0x0013dfff...
+Compressed 1234400 bytes to 769396...
+Writing at 0x00010000 [                              ]   0.0% 0/769396 bytes... 
+Writing at 0x0001ef96 [                              ]   2.1% 16384/769396 bytes... 
+Writing at 0x0002c1bf [>                             ]   4.3% 32768/769396 bytes... 
+Writing at 0x00034913 [>                             ]   6.4% 49152/769396 bytes... 
+Writing at 0x0003b82e [=>                            ]   8.5% 65536/769396 bytes... 
+Writing at 0x00043b71 [==>                           ]  10.6% 81920/769396 bytes... 
+Writing at 0x00049a56 [==>                           ]  12.8% 98304/769396 bytes... 
+Writing at 0x000501f7 [===>                          ]  14.9% 114688/769396 bytes... 
+Writing at 0x00055aa1 [====>                         ]  17.0% 131072/769396 bytes... 
+Writing at 0x0005b405 [====>                         ]  19.2% 147456/769396 bytes... 
+Writing at 0x00060d45 [=====>                        ]  21.3% 163840/769396 bytes... 
+Writing at 0x000669fb [======>                       ]  23.4% 180224/769396 bytes... 
+Writing at 0x0006ca46 [======>                       ]  25.6% 196608/769396 bytes... 
+Writing at 0x000748f8 [=======>                      ]  27.7% 212992/769396 bytes... 
+Writing at 0x0007bbdf [=======>                      ]  29.8% 229376/769396 bytes... 
+Writing at 0x00082132 [========>                     ]  31.9% 245760/769396 bytes... 
+Writing at 0x00087d8d [=========>                    ]  34.1% 262144/769396 bytes... 
+Writing at 0x0008dfac [=========>                    ]  36.2% 278528/769396 bytes... 
+Writing at 0x00093f2f [==========>                   ]  38.3% 294912/769396 bytes... 
+Writing at 0x00099ecc [===========>                  ]  40.5% 311296/769396 bytes... 
+Writing at 0x000a058d [===========>                  ]  42.6% 327680/769396 bytes... 
+Writing at 0x000a614a [============>                 ]  44.7% 344064/769396 bytes... 
+Writing at 0x000ab2fd [=============>                ]  46.8% 360448/769396 bytes... 
+Writing at 0x000b09d2 [=============>                ]  49.0% 376832/769396 bytes... 
+Writing at 0x000b60dc [==============>               ]  51.1% 393216/769396 bytes... 
+Writing at 0x000bc08e [==============>               ]  53.2% 409600/769396 bytes... 
+Writing at 0x000c187d [===============>              ]  55.4% 425984/769396 bytes... 
+Writing at 0x000c6ea2 [================>             ]  57.5% 442368/769396 bytes... 
+Writing at 0x000cc8ca [================>             ]  59.6% 458752/769396 bytes... 
+Writing at 0x000d1ef4 [=================>            ]  61.8% 475136/769396 bytes... 
+Writing at 0x000d7372 [==================>           ]  63.9% 491520/769396 bytes... 
+Writing at 0x000dd124 [==================>           ]  66.0% 507904/769396 bytes... 
+Writing at 0x000e2ce5 [===================>          ]  68.1% 524288/769396 bytes... 
+Writing at 0x000e84ae [====================>         ]  70.3% 540672/769396 bytes... 
+Writing at 0x000edd70 [====================>         ]  72.4% 557056/769396 bytes... 
+Writing at 0x000f3a5c [=====================>        ]  74.5% 573440/769396 bytes... 
+Writing at 0x000f979c [=====================>        ]  76.7% 589824/769396 bytes... 
+Writing at 0x000ff554 [======================>       ]  78.8% 606208/769396 bytes... 
+Writing at 0x0010548a [=======================>      ]  80.9% 622592/769396 bytes... 
+Writing at 0x0010ae5e [=======================>      ]  83.0% 638976/769396 bytes... 
+Writing at 0x00111807 [========================>     ]  85.2% 655360/769396 bytes... 
+Writing at 0x001175b8 [=========================>    ]  87.3% 671744/769396 bytes... 
+Writing at 0x0011f55b [=========================>    ]  89.4% 688128/769396 bytes... 
+Writing at 0x001264e4 [==========================>   ]  91.6% 704512/769396 bytes... 
+Writing at 0x0012c536 [===========================>  ]  93.7% 720896/769396 bytes... 
+Writing at 0x0013291b [===========================>  ]  95.8% 737280/769396 bytes... 
+Writing at 0x00137d3c [============================> ]  98.0% 753664/769396 bytes... 
+Writing at 0x0013d5e0 [==============================] 100.0% 769396/769396 bytes... 
+Wrote 1234400 bytes (769396 compressed) at 0x00010000 in 18.8 seconds (525.3 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Hard resetting via RTS pin...
+[0;33m--- esp-idf-monitor 1.9.0 on /dev/ttyUSB0 115200[0m
+[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H[0m
+Executing action: monitor
+Running idf_monitor in directory /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32
+Executing "/home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python /opt/esp-idf/tools/idf_monitor.py -p /dev/ttyUSB0 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/firmware_ESP32.elf /home/dmrx/Documents/proyecto_carrera/firmware_ESP32_SelfIQ-26-2/firmware_ESP32/build/bootloader/bootloader.elf -m '/home/dmrx/.espressif/python_env/idf6.0_py3.14_env/bin/python' '/opt/esp-idf/tools/idf.py' '-p' '/dev/ttyUSB0'"...
+ �x����������x���� �����x �xx �xets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0040,len:6272
+load:0x40078000,len:15820
+load:0x40080400,len:3920
+[0m--- 0x40080400: [0;33m_invalid_pc_placeholder[0m[0m at [0;32m/opt/esp-idf/components/xtensa/xtensa_vectors.S[0m[0m:[1;31m2259[0m
+entry 0x40080644
+[0m--- 0x40080644: [0;33mcall_start_cpu0[0m[0m at [0;32m/opt/esp-idf/components/bootloader/subproject/main/bootloader_start.c[0m[0m:[1;31m27[0m
+[0;32mI (27) boot: ESP-IDF v6.0.2 2nd stage bootloader[0m
+[0;32mI (27) boot: compile time Nov  2 2026 14:59:01[0m
+[0;32mI (27) boot: Multicore bootloader[0m
+[0;32mI (29) boot: chip revision: v3.1[0m
+[0;32mI (32) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (35) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (39) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (49) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (69) boot:  2 factory          factory app      00 00 00010000 00177000[0m
+[0;32mI (75) boot: End of partition table[0m
+[0;32mI (79) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=2fce0h (195808) map[0m
+[0;32mI (156) esp_image: segment 1: paddr=0003fd08 vaddr=3ffb0000 size=00310h (   784) load[0m
+[0;32mI (157) esp_image: segment 2: paddr=00040020 vaddr=400d0020 size=dc790h (903056) map[0m
+[0;32mI (481) esp_image: segment 3: paddr=0011c7b8 vaddr=3ffb0310 size=06cb4h ( 27828) load[0m
+[0;32mI (493) esp_image: segment 4: paddr=00123474 vaddr=40080000 size=1a118h (106776) load[0m
+[0;32mI (537) esp_image: segment 5: paddr=0013d594 vaddr=50000000 size=00028h (    40) load[0m
+[0;32mI (550) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (550) boot: Disabling RNG early entropy source...[0m
+[0;32mI (561) quad_psram: This chip is ESP32-D0WD[0m
+[0;32mI (563) esp_psram: Found 8MB PSRAM device[0m
+[0;32mI (563) esp_psram: Speed: 40MHz[0m
+[0;32mI (563) esp_psram: PSRAM initialized, cache is in low/high (2-core) mode.[0m
+[0;33mW (568) esp_psram: Virtual address not enough for PSRAM, map as much as we can. 4MB is mapped[0m
+[0;32mI (576) cpu_start: Multicore app[0m
+[0;32mI (1485) esp_psram: SPI SRAM memory test OK[0m
+[0;32mI (1493) cpu_start: GPIO 3 and 1 are used as console UART I/O pins[0m
+[0;32mI (1493) cpu_start: Pro cpu start user code[0m
+[0;32mI (1493) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (1495) app_init: Application information:[0m
+[0;32mI (1499) app_init: Project name:     firmware_ESP32[0m
+[0;32mI (1504) app_init: App version:      b9809b7[0m
+[0;32mI (1508) app_init: Compile time:     Nov 16 2026 20:29:18[0m
+[0;32mI (1513) app_init: ELF file SHA256:  7fdb20086...[0m
+[0;32mI (1517) app_init: ESP-IDF:          v6.0.2[0m
+[0;32mI (1521) efuse_init: Min chip rev:     v0.0[0m
+[0;32mI (1525) efuse_init: Max chip rev:     v3.99 [0m
+[0;32mI (1529) efuse_init: Chip rev:         v3.1[0m
+[0;32mI (1533) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (1539) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (1545) heap_init: At 3FFC3598 len 0001CA68 (114 KiB): DRAM[0m
+[0;32mI (1550) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (1555) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (1561) heap_init: At 4009A118 len 00005EE8 (23 KiB): IRAM[0m
+[0;32mI (1567) esp_psram: Adding pool of 4096K of PSRAM memory to heap allocator[0m
+[0;33mW (1574) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig[0m
+[0;32mI (1586) spi_flash: detected chip: generic[0m
+[0;32mI (1590) spi_flash: flash io: dio[0m
+[0;32mI (1595) main_task: Started on CPU0[0m
+[0;32mI (1595) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations[0m
+[0;32mI (1595) main_task: Calling app_main()[0m
+[0;32mI (1645) SELFIQ_ROI: ROI: count=1 version=59 crc=OK[0m
+[0;32mI (1645) SELFIQ_CAL_STORE: NVS lista: banco doble, descriptor 8x8, version=1[0m
+[0;32mI (1655) MAIN: [CAL] almacenamiento v1 preparado; no hay capturas automáticas[0m
+[0;32mI (1655) SELFIQ_NVS: ========== ESTADISTICAS NVS ==========[0m
+[0;32mI (1665) SELFIQ_NVS: Entradas totales: 756[0m
+[0;32mI (1665) SELFIQ_NVS: Entradas utilizadas: 339[0m
+[0;32mI (1675) SELFIQ_NVS: Entradas libres: 417[0m
+[0;32mI (1675) SELFIQ_NVS: Namespaces: 8[0m
+[0;32mI (1675) SELFIQ_NVS: =====================================[0m
+[0;32mI (1695) wifi:wifi driver task: 3ffcb100, prio:23, stack:6656, core=0[0m
+[0;32mI (1705) wifi:wifi firmware version: 00ad238[0m
+[0;32mI (1705) wifi:wifi certification version: v7.0[0m
+[0;32mI (1705) wifi:config NVS flash: enabled[0m
+[0;32mI (1705) wifi:config nano formatting: disabled[0m
+[0;32mI (1715) wifi:Init data frame dynamic rx buffer num: 32[0m
+[0;32mI (1715) wifi:Init static rx mgmt buffer num: 5[0m
+[0;32mI (1725) wifi:Init management short buffer num: 32[0m
+[0;32mI (1725) wifi:Init dynamic tx buffer num: 32[0m
+[0;32mI (1735) wifi:Init static rx buffer size: 1600[0m
+[0;32mI (1735) wifi:Init static rx buffer num: 10[0m
+[0;32mI (1735) wifi:Init dynamic rx buffer num: 32[0m
+[0;32mI (1745) wifi_init: rx ba win: 6[0m
+[0;32mI (1745) wifi_init: accept mbox: 6[0m
+[0;32mI (1745) wifi_init: tcpip mbox: 32[0m
+[0;32mI (1755) wifi_init: udp mbox: 6[0m
+[0;32mI (1755) wifi_init: tcp mbox: 6[0m
+[0;32mI (1755) wifi_init: tcp tx win: 5760[0m
+[0;32mI (1765) wifi_init: tcp rx win: 5760[0m
+[0;32mI (1765) wifi_init: tcp mss: 1440[0m
+[0;32mI (1765) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (1775) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;32mI (1775) phy_init: phy_version 4863,a3a4459,Oct 28 2025,14:30:06[0m
+[0;32mI (1855) wifi:mode : sta (28:05:a5:25:35:c8)[0m
+[0;32mI (1855) wifi:enable tsf[0m
+[0;32mI (1855) VISION_TRIAL: E4_ROI_OCC_V1: max_roi=2 period_ms=10000; production-only telemetry; experimental diagnostics isolated[0m
+[0;33mW (1865) MAIN: [NETWORK] ronda 1/4, hasta 5 intentos[0m
+[0;32mI (1865) cam_hal: cam init ok[0m
+[0;32mI (1865) sccb-ng: pin_sda 26 pin_scl 27[0m
+[0;32mI (1875) sccb-ng: sccb_i2c_port=1[0m
+[0;32mI (1875) wifi_lib: [NETWORK] credenciales cargadas; conectando a 'INFINITUMF4AF'[0m
+[0;32mI (1905) ov3640: Mismatch PID=0x3660[0m
+[0;32mI (1905) camera: Camera PID=0x3660 VER=0x00 MIDL=0x00 MIDH=0x00[0m
+[0;32mI (1905) camera: Detected OV3660 camera[0m
+[0;32mI (1905) camera: Detected camera at address=0x3c[0m
+[0;32mI (2235) cam_hal: PSRAM DMA mode disabled[0m
+[0;32mI (2235) esp32 ll_cam: node_size: 2560, nodes_per_line: 1, lines_per_node: 1, dma_half_buffer_min:  2560, dma_half_buffer: 15360,lines_per_half_buffer:  6, dma_buffer_size: 30720, image_size: 307200[0m
+[0;32mI (2245) cam_hal: buffer_size: 30720, half_buffer_size: 15360, node_buffer_size: 2560, node_cnt: 12, total_cnt: 20[0m
+[0;32mI (2255) cam_hal: Allocating 307200 Byte frame buffer in PSRAM[0m
+[0;32mI (2255) cam_hal: Allocating 307200 Byte frame buffer in PSRAM[0m
+[0;32mI (2265) cam_hal: cam config ok[0m
+[0;32mI (2285) ov3660: Calculated VCO: 80000000 Hz, PLLCLK: 40000000 Hz, SYSCLK: 10000000 Hz, PCLK: 10000000 Hz[0m
+[0;32mI (2305) SELFIQ_CAMERA: Camara inicializada: PID=0x3660 (OV3660), PSRAM=si[0m
+[0;32mI (2305) SELFIQ_CAMERA: CAPTURE_STARTED: intervalo=1000 ms; grises 640x480, 2 buffers PSRAM[0m
+cam_hal: EV-EOF-OVF
+[0;32mI (2995) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=584263 ok=1 fail=0 heap=132539[0m
+[0;32mI (4925) wifi:new:<11,0>, old:<1,0>, ap:<255,255>, sta:<11,0>, prof:1, snd_ch_cfg:0x0[0m
+[0;32mI (4935) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (5025) wifi:state: auth -> assoc (0x0)[0m
+[0;32mI (5045) wifi:state: assoc -> run (0x10)[0m
+[0;32mI (5085) wifi:connected with INFINITUMF4AF, aid = 89, channel 11, BW20, bssid = d8:6d:17:90:8f:48[0m
+[0;32mI (5085) wifi:security: WPA2-PSK, phy: bgn, rssi: -62, cipher(pairwise:0x3, group:0x3), pmf:0[0m
+[0;32mI (5095) wifi:pm start, type: 1[0m
+
+[0;32mI (5095) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us[0m
+[0;32mI (5125) wifi:AP's beacon interval = 102400 us, DTIM period = 1[0m
+[0;32mI (5955) wifi:<ba-add>idx:0 (ifx:0, d8:6d:17:90:8f:48), tid:0, ssn:1, winSize:64[0m
+[0;32mI (8245) esp_netif_handlers: sta ip: 192.168.1.101, mask: 255.255.255.0, gw: 192.168.1.254[0m
+[0;32mI (8245) wifi_lib: [NETWORK] WIFI_READY IP=192.168.1.101[0m
+[0;32mI (8525) selfiq_mqtt: Identidad NVS lista para operacion local[0m
+[0;32mI (8535) selfiq_mqtt: [CAL] worker stack_min_free=7884 bytes budget=8192[0m
+[0;32mI (8535) selfiq_mqtt: [MQTT] broker=mqtt://192.168.1.98:1883; identidad y cola RAM conservadas[0m
+[0;32mI (8735) selfiq_mqtt: ESP32 registrada: MAC=28:05:A5:25:35:C8 ID=5c485efa-cc20-4f9a-91eb-ceeba0f99289 SUCURSAL=d07018c7-99c1-490f-95b9-dd54589cf60b[0m
+[0;32mI (8735) selfiq_mqtt: MQTT conectado; esperando suscripcion de respuesta (msg_id=49375)[0m
+[0;32mI (8755) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=48023)[0m
+[0;32mI (8765) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=42371)[0m
+[0;32mI (8765) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=10562)[0m
+[0;32mI (8795) selfiq_mqtt: Suscripcion MQTT confirmada (msg_id=49375)[0m
+[0;32mI (9345) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (11305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=10 fail=0 heap=107359[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (21355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=20 fail=0 heap=107359[0m
+[0;32mI (23795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (31355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=50 ok=30 fail=0 heap=107235[0m
+cam_hal: FB-OVF
+[0;32mI (40345) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-OVF
+[0;32mI (41345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=53 ok=40 fail=0 heap=107235[0m
+[0;32mI (51305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=74 ok=50 fail=0 heap=107235[0m
+[0;32mI (53795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (57875) wifi:<ba-add>idx:1 (ifx:0, d8:6d:17:90:8f:48), tid:6, ssn:5, winSize:64[0m
+[0;32mI (61305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=58 ok=60 fail=0 heap=107163[0m
+[0;32mI (62345) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107163 fails=0 uptime=60s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (62345) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=26277 guard=50/54 guard_warn=0 frames=61 accepted=47 rejected=14 frame_rej=14 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=41160 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=2 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (68815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (68825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (68835) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (68845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (68845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (71305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=33 ok=70 fail=0 heap=107163[0m
+[0;32mI (72335) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (81305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=81 ok=80 fail=0 heap=107163[0m
+[0;32mI (83795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (91345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=55 ok=90 fail=0 heap=107163[0m
+[0;32mI (101335) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=70 ok=100 fail=0 heap=107163[0m
+[0;32mI (102355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (111345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=110 fail=0 heap=107163[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (113795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (121335) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=120 fail=0 heap=107163[0m
+[0;32mI (122355) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107163 fails=0 uptime=120s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (122355) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=26551 guard=51/54 guard_warn=0 frames=121 accepted=93 rejected=28 frame_rej=28 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47823 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=4 queue_rej=4[0m
+[0;32mI (129965) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (129975) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130025) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130035) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (130045) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (131345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=130 fail=0 heap=107183[0m
+[0;32mI (133355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=99 samples=5[0m
+[0;32mI (141355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=140 fail=0 heap=107183[0m
+[0;32mI (143795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (151345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=66 ok=150 fail=0 heap=107183[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (161345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=88 ok=160 fail=0 heap=107183[0m
+[0;32mI (164345) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (171355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=170 fail=0 heap=107183[0m
+[0;32mI (173795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (181345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=50 ok=180 fail=0 heap=107183[0m
+[0;32mI (182355) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=180s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (182355) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=26777 guard=51/54 guard_warn=0 frames=181 accepted=146 rejected=35 frame_rej=35 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47452 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=6 queue_rej=4[0m
+[0;32mI (188715) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (188745) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (188755) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (188765) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (188785) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (191335) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=190 fail=0 heap=107191[0m
+[0;32mI (195345) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-OVF
+[0;32mI (201305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=82 ok=200 fail=0 heap=107191[0m
+[0;32mI (203795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (211345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=50 ok=210 fail=0 heap=107191[0m
+cam_hal: EV-VSYNC-OVF - 100 additional misses
+[0;32mI (221345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=56 ok=220 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (226355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (231355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=230 fail=0 heap=107191[0m
+[0;32mI (233795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (241345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=240 fail=0 heap=107191[0m
+[0;32mI (242345) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=240s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (242355) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=26777 guard=49/54 guard_warn=0 frames=241 accepted=195 rejected=46 frame_rej=46 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47458 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=8 queue_rej=4[0m
+[0;32mI (248725) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (248745) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (248775) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (248795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (249265) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (251345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=250 fail=0 heap=107191[0m
+[0;32mI (257335) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (261305) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=260 fail=0 heap=107191[0m
+[0;32mI (263805) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (271345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=270 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+[0;32mI (281335) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=61 ok=280 fail=0 heap=107183[0m
+[0;32mI (287355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (291345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=290 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (293805) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (301355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=74 ok=300 fail=0 heap=107191[0m
+[0;32mI (302365) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=300s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (302365) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=27909 guard=49/54 guard_warn=0 frames=301 accepted=243 rejected=58 frame_rej=58 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47863 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=10 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (308775) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (308795) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (308815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (308815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (308825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (311355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=310 fail=0 heap=107191[0m
+[0;32mI (318355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (321365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=320 fail=0 heap=107191[0m
+[0;32mI (323815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (331355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=74 ok=330 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (341355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=340 fail=0 heap=107191[0m
+[0;32mI (348355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (351355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=59 ok=350 fail=0 heap=107191[0m
+[0;32mI (353815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-OVF
+cam_hal: FB-OVF
+[0;32mI (361345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=360 fail=0 heap=107191[0m
+[0;32mI (363365) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=361s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (363365) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=26987 guard=49/54 guard_warn=0 frames=362 accepted=293 rejected=69 frame_rej=69 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52120 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=12 queue_rej=4[0m
+[0;32mI (369065) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (369075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (369085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (369105) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (369115) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (371345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=86 ok=370 fail=0 heap=107191[0m
+[0;32mI (378355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (381365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=57 ok=380 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (385245) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (391315) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=101 ok=390 fail=0 heap=107191[0m
+[0;32mI (401365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=81 ok=400 fail=0 heap=107191[0m
+[0;32mI (408355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (411315) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=410 fail=0 heap=107191[0m
+[0;32mI (414055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (421355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=420 fail=0 heap=107191[0m
+[0;32mI (423365) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=421s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (423365) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=27683 guard=49/54 guard_warn=0 frames=422 accepted=344 rejected=78 frame_rej=78 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=53618 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=14 queue_rej=4[0m
+[0;32mI (428885) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (428925) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (429385) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (429395) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (429405) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (431315) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=430 fail=0 heap=107163[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (439355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (441345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=25 ok=440 fail=0 heap=107191[0m
+[0;32mI (444055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (451365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=450 fail=0 heap=107191[0m
+[0;32mI (461325) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=65 ok=460 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (471375) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (471375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=66 ok=470 fail=0 heap=107191[0m
+[0;32mI (474055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (481365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=480 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (483375) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=481s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (483375) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=27666 guard=50/54 guard_warn=0 frames=482 accepted=390 rejected=92 frame_rej=92 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52203 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=16 queue_rej=4[0m
+[0;32mI (489065) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (489075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (489085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (489085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (489095) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (491365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=18 ok=490 fail=0 heap=107191[0m
+[0;32mI (501355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=500 fail=0 heap=107191[0m
+[0;32mI (502355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (504055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (511365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=510 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (521355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=49 ok=520 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (531375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=530 fail=0 heap=107191[0m
+[0;32mI (533365) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (534055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (541355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=60 ok=540 fail=0 heap=107191[0m
+[0;32mI (544375) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=542s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (544375) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28377 guard=50/54 guard_warn=0 frames=543 accepted=433 rejected=110 frame_rej=110 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=50888 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=18 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (549075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (549085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (549095) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (549105) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (549115) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (551375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=40 ok=550 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (561365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=84 ok=560 fail=0 heap=107191[0m
+[0;32mI (563355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (564055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (571365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=570 fail=0 heap=107191[0m
+[0;32mI (581365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=18 ok=580 fail=0 heap=107191[0m
+[0;32mI (591375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=590 fail=0 heap=107191[0m
+[0;32mI (593365) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (594055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (601325) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=600 fail=0 heap=107191[0m
+[0;32mI (604375) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=602s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (604375) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28135 guard=49/54 guard_warn=0 frames=603 accepted=485 rejected=118 frame_rej=118 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=50092 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=20 queue_rej=4[0m
+cam_hal: FB-OVF
+[0;32mI (610325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (610335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (610345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (610355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (610365) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (611355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=82 ok=610 fail=0 heap=107191[0m
+cam_hal: EV-VSYNC-OVF - 100 additional misses
+[0;32mI (621365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=620 fail=0 heap=107191[0m
+[0;32mI (624375) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (631365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=60 ok=630 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (639055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (641325) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=50 ok=640 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (651375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=76 ok=650 fail=0 heap=107191[0m
+[0;32mI (655375) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (661365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=660 fail=0 heap=107191[0m
+[0;32mI (665355) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=663s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (665355) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28135 guard=49/54 guard_warn=0 frames=664 accepted=531 rejected=133 frame_rej=133 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=34438 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=22 queue_rej=4[0m
+[0;32mI (669025) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (669045) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (669055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (669075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (669085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (669095) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (671375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=670 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (681365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=680 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (685355) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-OVF
+[0;32mI (691365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=690 fail=0 heap=107191[0m
+[0;32mI (700435) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (701375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=113 ok=700 fail=0 heap=107191[0m
+[0;32mI (711385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=710 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (715395) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (721375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=720 fail=0 heap=107191[0m
+[0;32mI (725395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=723s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (725395) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28377 guard=50/54 guard_warn=0 frames=724 accepted=585 rejected=139 frame_rej=139 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47271 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=24 queue_rej=4[0m
+[0;32mI (729325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (729325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (729335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (729345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (729355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (729355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (731395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=39 ok=730 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (741375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=740 fail=0 heap=107191[0m
+[0;32mI (745385) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (751385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=750 fail=0 heap=107191[0m
+[0;32mI (759315) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (761345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=760 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (771395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=770 fail=0 heap=107191[0m
+[0;32mI (779395) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (781385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=780 fail=0 heap=107191[0m
+[0;32mI (785385) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=783s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (785385) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=27893 guard=50/54 guard_warn=0 frames=784 accepted=634 rejected=150 frame_rej=150 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=46676 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=26 queue_rej=4[0m
+cam_hal: EV-VSYNC-OVF - 100 additional misses
+[0;32mI (789305) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (789315) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (789325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (789335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (789345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (789345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (791345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=790 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (801395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=84 ok=800 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (809395) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (811385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=810 fail=0 heap=107191[0m
+[0;32mI (819205) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (821395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=820 fail=0 heap=107191[0m
+[0;32mI (831345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=830 fail=0 heap=107191[0m
+[0;32mI (840385) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (841385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=65 ok=840 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (846375) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=844s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (846375) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28619 guard=50/54 guard_warn=0 frames=845 accepted=682 rejected=163 frame_rej=163 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=36557 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=28 queue_rej=4[0m
+cam_hal: FB-OVF
+[0;32mI (849205) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (849235) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (850555) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (850565) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (850575) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (851395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=86 ok=850 fail=0 heap=107191[0m
+[0;32mI (853115) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (861385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=860 fail=0 heap=107191[0m
+[0;32mI (871385) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (871385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=22 ok=870 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (879305) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (881385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=37 ok=880 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (891385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=890 fail=0 heap=107191[0m
+[0;32mI (901345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=900 fail=0 heap=107191[0m
+[0;32mI (902395) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (907395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=905s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (907395) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28377 guard=50/54 guard_warn=0 frames=906 accepted=732 rejected=174 frame_rej=174 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=54725 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=30 queue_rej=4[0m
+[0;32mI (909275) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (909285) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (909305) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (909315) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (909325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (909325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (911385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=17 ok=910 fail=0 heap=107191[0m
+[0;32mI (921385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=920 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+[0;32mI (931375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=930 fail=0 heap=107191[0m
+[0;32mI (933395) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (939305) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (941345) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=940 fail=0 heap=107191[0m
+[0;32mI (951385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=950 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (961385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=960 fail=0 heap=107191[0m
+[0;32mI (964385) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (967395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=965s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (967395) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28377 guard=50/54 guard_warn=0 frames=966 accepted=783 rejected=183 frame_rej=183 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52272 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=32 queue_rej=4[0m
+[0;32mI (969335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (969365) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (969385) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (969395) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (969405) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (969405) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (971385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=56 ok=970 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (981385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=980 fail=0 heap=107191[0m
+[0;32mI (991375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=51 ok=990 fail=0 heap=107191[0m
+[0;32mI (995375) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (999555) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1001395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=72 ok=1000 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1009395) VISION_TRIAL: CAM_MOVED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 streak=5 uptime_ms=1007779[0m
+[0;32mI (1011385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=50 ok=1010 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1014565) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1021375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=22 ok=1020 fail=0 heap=107191[0m
+[0;32mI (1027395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1025s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1027395) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=29329 guard=47/54 guard_warn=0 frames=1026 accepted=837 rejected=189 frame_rej=189 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=51911 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1029375) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1029395) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1029415) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1029455) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1029475) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1031395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1030 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1041385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=29 ok=1040 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1051375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=74 ok=1050 fail=0 heap=107191[0m
+[0;32mI (1061375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=1060 fail=0 heap=107163[0m
+[0;32mI (1071395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1070 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1081385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=24 ok=1080 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1088395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1086s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (1088405) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=29329 guard=47/54 guard_warn=0 frames=1087 accepted=883 rejected=204 frame_rej=204 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47481 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1089565) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1090825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1090835) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1090845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1090845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1091395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=84 ok=1090 fail=0 heap=107191[0m
+[0;32mI (1101385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=44 ok=1100 fail=0 heap=107191[0m
+[0;32mI (1111395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=1110 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1121385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=1120 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1131395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=1130 fail=0 heap=107191[0m
+[0;32mI (1141385) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=57 ok=1140 fail=0 heap=107191[0m
+[0;32mI (1149355) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1147s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (1149355) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=invalid_or_stale_frame valid=0 pct=-1 smooth=-1 samples=0 raw_q8=0 guard=0/0 guard_warn=0 frames=1148 accepted=937 rejected=211 frame_rej=211 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=78 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1149585) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1149605) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1149615) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1149625) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1149645) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1151405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=58 ok=1150 fail=0 heap=107191[0m
+[0;32mI (1161395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=38 ok=1160 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1171405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=25 ok=1170 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1181405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1180 fail=0 heap=107191[0m
+[0;32mI (1191355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=1190 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1201405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=1200 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1209395) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1207s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1209405) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=28861 guard=48/54 guard_warn=0 frames=1208 accepted=983 rejected=225 frame_rej=225 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=46680 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1209585) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1209595) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1209595) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1209605) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1209615) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1211405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=44 ok=1210 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1221395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=18 ok=1220 fail=0 heap=107191[0m
+[0;32mI (1231355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=1230 fail=0 heap=107191[0m
+[0;32mI (1241395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1240 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1251395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1250 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (1261355) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=1260 fail=0 heap=107191[0m
+[0;32mI (1269405) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1267s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1269405) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=29782 guard=48/54 guard_warn=0 frames=1268 accepted=1033 rejected=235 frame_rej=235 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=46425 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1269555) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1270085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1270105) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1270115) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1270125) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1271415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=1270 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1281405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1280 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1291415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=24 ok=1290 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1301415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=1300 fail=0 heap=107191[0m
+[0;32mI (1311405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1310 fail=0 heap=107191[0m
+[0;32mI (1321405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=115 ok=1320 fail=0 heap=107191[0m
+[0;32mI (1329415) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1327s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1329415) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30024 guard=48/54 guard_warn=0 frames=1328 accepted=1087 rejected=241 frame_rej=241 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=49031 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1329815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1329825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1329835) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1329845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1329845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1331395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=1330 fail=0 heap=107183[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+[0;32mI (1341405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=1340 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1351405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=20 ok=1350 fail=0 heap=107191[0m
+[0;32mI (1361415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1360 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1371365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=80 ok=1370 fail=0 heap=107191[0m
+[0;32mI (1381415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=1380 fail=0 heap=107191[0m
+[0;32mI (1389405) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1387s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1389405) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30024 guard=48/54 guard_warn=0 frames=1388 accepted=1133 rejected=255 frame_rej=255 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=40597 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1389815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1389825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1389845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1389855) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1389875) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1391395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1390 fail=0 heap=107191[0m
+[0;32mI (1401405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=105 ok=1400 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1411405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=71 ok=1410 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+[0;32mI (1421405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=56 ok=1420 fail=0 heap=107191[0m
+[0;32mI (1431395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=1430 fail=0 heap=107191[0m
+[0;32mI (1441395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=1440 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1449405) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1447s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1449405) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=29571 guard=48/54 guard_warn=0 frames=1448 accepted=1187 rejected=261 frame_rej=261 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=42661 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1450075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1450085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1451225) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1451245) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1451255) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1451405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=80 ok=1450 fail=0 heap=107183[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1461405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1460 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1471415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=27 ok=1470 fail=0 heap=107191[0m
+[0;32mI (1481395) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1480 fail=0 heap=107191[0m
+[0;32mI (1491405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1490 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (1501415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=37 ok=1500 fail=0 heap=107191[0m
+[0;32mI (1509415) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1507s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1509415) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30266 guard=49/54 guard_warn=0 frames=1508 accepted=1236 rejected=272 frame_rej=272 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52493 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1509815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1509825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1511035) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1511045) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1511055) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1511405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=84 ok=1510 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1521365) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=59 ok=1520 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1531415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=59 ok=1530 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1541375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=1540 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1551415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=126 ok=1550 fail=0 heap=107191[0m
+[0;32mI (1561445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=19003 ok=1560 fail=0 heap=107191[0m
+[0;32mI (1569425) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1567s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1569425) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30055 guard=48/54 guard_warn=0 frames=1568 accepted=1282 rejected=286 frame_rej=286 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52420 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=33 queue_rej=4[0m
+[0;32mI (1569825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1569835) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1569845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1569845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1569855) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1571405) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=1570 fail=0 heap=107191[0m
+cam_hal: EV-VSYNC-OVF - 100 additional misses
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1581415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=1580 fail=0 heap=107191[0m
+cam_hal: FB-OVF
+[0;32mI (1591415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=60 ok=1590 fail=0 heap=107191[0m
+[0;32mI (1601415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1600 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1611415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=57 ok=1610 fail=0 heap=107191[0m
+[0;32mI (1614405) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (1614815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1621425) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1620 fail=0 heap=107191[0m
+[0;32mI (1629425) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1627s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1629425) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30750 guard=48/54 guard_warn=0 frames=1628 accepted=1336 rejected=292 frame_rej=292 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52506 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=34 queue_rej=4[0m
+[0;32mI (1629745) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1629765) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1629775) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1629785) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1629805) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1631415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=37 ok=1630 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1641375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=18 ok=1640 fail=0 heap=107191[0m
+[0;32mI (1644415) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (1646295) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1651425) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=48 ok=1650 fail=0 heap=107191[0m
+[0;32mI (1661415) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=37 ok=1660 fail=0 heap=107191[0m
+[0;32mI (1671375) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=40 ok=1670 fail=0 heap=107163[0m
+[0;32mI (1675415) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (1681425) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=40 ok=1680 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1686415) VISION_TRIAL: CAM_MOVED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 streak=5 uptime_ms=1684809[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1689435) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1687s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1689435) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=31460 guard=48/54 guard_warn=0 frames=1688 accepted=1385 rejected=303 frame_rej=303 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=53103 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=36 queue_rej=4[0m
+[0;32mI (1689815) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689855) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689855) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689865) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1689875) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1691435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1690 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1701435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=51 ok=1700 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1711435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=24 ok=1710 fail=0 heap=107191[0m
+[0;32mI (1721425) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=1720 fail=0 heap=107191[0m
+[0;32mI (1731445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1730 fail=0 heap=107191[0m
+[0;32mI (1741435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1740 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1742455) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (1749455) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1747s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1749455) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30750 guard=48/54 guard_warn=0 frames=1748 accepted=1434 rejected=314 frame_rej=314 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=46482 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=37 queue_rej=4[0m
+[0;32mI (1749825) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1749845) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1749855) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1749865) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1749875) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1749885) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1751465) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=35 ok=1750 fail=0 heap=107191[0m
+[0;32mI (1761455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=1760 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1771465) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=59 ok=1770 fail=0 heap=107191[0m
+[0;32mI (1772475) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1780065) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1781475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=62 ok=1780 fail=0 heap=107191[0m
+[0;32mI (1784475) VISION_TRIAL: CAM_MOVED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 streak=5 uptime_ms=1782869[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1791435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1790 fail=0 heap=107191[0m
+[0;32mI (1795065) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1801475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=52 ok=1800 fail=0 heap=107191[0m
+[0;32mI (1809485) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1807s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1809485) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=31218 guard=48/54 guard_warn=0 frames=1808 accepted=1492 rejected=316 frame_rej=316 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47759 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=38 queue_rej=4[0m
+[0;32mI (1811365) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1811385) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1811395) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1811405) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1811415) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1811435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=78 ok=1810 fail=0 heap=104063[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1821435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=1820 fail=0 heap=107191[0m
+[0;32mI (1831475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=1830 fail=0 heap=107191[0m
+[0;32mI (1841485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=1840 fail=0 heap=107191[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1851475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1850 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1861475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=53 ok=1860 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1870485) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1868s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (1870485) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30492 guard=49/54 guard_warn=0 frames=1869 accepted=1537 rejected=332 frame_rej=332 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52312 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=38 queue_rej=4[0m
+[0;32mI (1871485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=71 ok=1870 fail=0 heap=107191[0m
+[0;32mI (1877475) VISION_TRIAL: ROI_OCC_QUEUED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 pct=100 raw=100 samples=5[0m
+[0;32mI (1881475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=44 ok=1880 fail=0 heap=107191[0m
+[0;32mI (1886225) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1886235) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1887555) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1887575) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1887585) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1887595) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1891485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=88 ok=1890 fail=0 heap=107191[0m
+[0;32mI (1892475) VISION_TRIAL: CAM_MOVED: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 streak=5 uptime_ms=1890869[0m
+[0;32mI (1900065) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1901475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=1900 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-OVF
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1911475) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=63 ok=1910 fail=0 heap=107191[0m
+[0;32mI (1921435) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=97 ok=1920 fail=0 heap=107163[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1930485) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107191 fails=0 uptime=1928s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1930485) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30492 guard=49/54 guard_warn=0 frames=1929 accepted=1588 rejected=341 frame_rej=341 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=53042 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+[0;32mI (1931485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=70 ok=1930 fail=0 heap=107191[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1941485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=1940 fail=0 heap=107191[0m
+[0;32mI (1944945) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1944965) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1944975) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1944975) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (1944995) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (1951445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=75 ok=1950 fail=0 heap=107003[0m
+[0;32mI (1961495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=49 ok=1960 fail=0 heap=107003[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (1971485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=72 ok=1970 fail=0 heap=107003[0m
+[0;32mI (1981445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=1980 fail=0 heap=107003[0m
+[0;32mI (1990495) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=1988s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (1990495) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=30960 guard=47/54 guard_warn=0 frames=1989 accepted=1638 rejected=351 frame_rej=351 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52591 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+[0;32mI (1991445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=68 ok=1990 fail=0 heap=107003[0m
+[0;32mI (2001485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=36 ok=2000 fail=0 heap=107003[0m
+[0;32mI (2004975) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2005075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2005085) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2005095) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2005105) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2011485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=145 ok=2010 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2021495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=2020 fail=0 heap=107003[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2031485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=2030 fail=0 heap=107003[0m
+[0;32mI (2041495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=58 ok=2040 fail=0 heap=107003[0m
+[0;32mI (2050495) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2048s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (2050495) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=31218 guard=47/54 guard_warn=0 frames=2049 accepted=1685 rejected=364 frame_rej=364 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=52370 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+[0;32mI (2051445) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=68 ok=2050 fail=0 heap=107003[0m
+[0;32mI (2061485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=2060 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2065075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2067675) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2067685) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2067695) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2067715) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: FB-OVF
+[0;32mI (2071505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=47 ok=2070 fail=0 heap=107003[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (2081495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=2080 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2091495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=36 ok=2090 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2101455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=93 ok=2100 fail=0 heap=106975[0m
+[0;32mI (2111485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=2110 fail=0 heap=107003[0m
+[0;32mI (2111485) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2109s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (2111495) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=31912 guard=47/54 guard_warn=0 frames=2110 accepted=1733 rejected=377 frame_rej=377 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=36419 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2121455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=2120 fail=0 heap=107003[0m
+[0;32mI (2125325) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2125335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2125345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2125355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2125355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2131505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=2130 fail=0 heap=107003[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (2141495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=36 ok=2140 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2151495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=43 ok=2150 fail=0 heap=107003[0m
+cam_hal: FB-OVF
+[0;32mI (2161505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=28 ok=2160 fail=0 heap=107003[0m
+[0;32mI (2171505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=37 ok=2170 fail=0 heap=107003[0m
+[0;32mI (2171505) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2169s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (2171515) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=100 smooth=100 samples=5 raw_q8=31218 guard=47/54 guard_warn=0 frames=2170 accepted=1782 rejected=388 frame_rej=388 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=50861 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2181495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=2180 fail=0 heap=107003[0m
+[0;32mI (2185335) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2185345) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2185355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2185355) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2185365) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (2191505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=46 ok=2190 fail=0 heap=107003[0m
+[0;32mI (2201505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=18 ok=2200 fail=0 heap=107003[0m
+[0;32mI (2211455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=34 ok=2210 fail=0 heap=107003[0m
+[0;32mI (2221505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=45 ok=2220 fail=0 heap=107003[0m
+cam_hal: FB-OVF
+[0;32mI (2231505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=23 ok=2230 fail=0 heap=107003[0m
+[0;32mI (2231505) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2229s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (2231505) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=29 smooth=30 samples=5 raw_q8=7541 guard=49/54 guard_warn=0 frames=2230 accepted=1830 rejected=400 frame_rej=400 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=49854 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+cam_hal: FB-OVF
+[0;32mI (2241455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=66 ok=2240 fail=0 heap=107003[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (2247075) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2247095) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2247145) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2247155) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2247165) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2251505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=2250 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2261455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=21 ok=2260 fail=0 heap=107003[0m
+[0;32mI (2271455) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=41 ok=2270 fail=0 heap=107003[0m
+[0;32mI (2281495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=2280 fail=0 heap=107003[0m
+[0;32mI (2291495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=2290 fail=0 heap=107003[0m
+[0;32mI (2292485) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2290s profile=0 frames_60s=61 cal_ok=0 cal_rej=0[0m
+[0;32mI (2292485) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=31 smooth=31 samples=5 raw_q8=8042 guard=48/54 guard_warn=0 frames=2291 accepted=1872 rejected=419 frame_rej=419 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=34391 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+cam_hal: EV-EOF-OVF - 100 additional misses
+[0;32mI (2301485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=2300 fail=0 heap=107003[0m
+[0;32mI (2305215) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2305255) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2307905) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2307925) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2307935) selfiq_mqtt: [STORAGE] LOCAL_COMMIT_ACK; liberando mensaje RAM[0m
+[0;32mI (2311495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=30 ok=2310 fail=0 heap=107003[0m
+cam_hal: FB-OVF
+[0;32mI (2321485) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=2320 fail=0 heap=107003[0m
+[0;32mI (2331495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=2330 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2341505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=54 ok=2340 fail=0 heap=107003[0m
+cam_hal: FB-SIZE: 303360 != 307200
+[0;32mI (2351495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=32 ok=2350 fail=0 heap=107003[0m
+[0;32mI (2352495) SELFIQ_CAMERA: HEALTH: fps=1.0 heap=107003 fails=0 uptime=2350s profile=0 frames_60s=60 cal_ok=0 cal_rej=0[0m
+[0;32mI (2352505) VISION_TRIAL: E3_PILOT: roi=2adb7be0-2eb5-4039-b05b-d99d7360d379 cfg=59 cal=2 status=ok valid=1 pct=32 smooth=31 samples=5 raw_q8=8267 guard=48/54 guard_warn=0 frames=2351 accepted=1924 rejected=427 frame_rej=427 clip_rej=0 bg_rej=0 weak_rej=0 ctx_rej=0 refs_missing=0 other_roi_skips=0 us=47306 max_us=102072 stack_min=3044 source=prod publication=prod_only queued=39 queue_rej=4[0m
+cam_hal: FB-SIZE: 303360 != 307200
+cam_hal: EV-EOF-OVF - 100 additional misses
+[1;31mE (2359105) mqtt_client: esp_mqtt_handle_transport_read_error: transport_read(): EOF[0m
+[1;31mE (2359105) mqtt_client: esp_mqtt_handle_transport_read_error: transport_read() error: errno=128[0m
+[0;33mW (2359115) selfiq_mqtt: Error MQTT (revisar broker/red)[0m
+[1;31mE (2359115) mqtt_client: mqtt_process_receive: mqtt_message_receive() returned -2[0m
+[0;33mW (2359125) selfiq_mqtt: MQTT desconectado; el cliente reintentará automáticamente[0m
+[0;32mI (2361495) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=42 ok=2360 fail=0 heap=102251[0m
+[0;33mW (2368075) MAIN: [MQTT] BROKER_NOT_FOUND; nuevo intento en 60000 ms[0m
+[0;32mI (2371505) SELFIQ_CAMERA: CAPTURE_OK: 640x480 bytes=307200 capture_us=26 ok=2370 fail=0 heap=106863[0m
+[0m
+Done
