@@ -18,6 +18,8 @@ typedef struct {
     int64_t captured_us;
     bool valid;
     uint8_t occupancy_pct; /* 255 if invalid, not a stock-zero reading */
+    uint8_t occupancy_smoothed_pct; /* mediana publicada; 255 si no hay ventana */
+    uint8_t median_samples; /* muestras validas en la ventana (0..5) */
     char roi_id[37];
     const char *status;
 } vision_pilot_health_t;

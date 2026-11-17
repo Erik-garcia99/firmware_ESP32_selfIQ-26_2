@@ -31,6 +31,7 @@ static bool queue_full;
 static bool production_fixture;
 static uint32_t fixture_version;
 static unsigned kernel_reads;
+static unsigned last_published_value;
 esp_err_t mqtt_queue_json(const char *type, const char *data) {
     assert(!strcmp(type, "roi_occ"));
     cJSON *root = cJSON_Parse(data);
@@ -38,6 +39,12 @@ esp_err_t mqtt_queue_json(const char *type, const char *data) {
     assert(cJSON_GetObjectItemCaseSensitive(root, "roi_id"));
     assert(cJSON_GetObjectItemCaseSensitive(root, "value")->valueint <= 100);
     assert(cJSON_GetObjectItemCaseSensitive(root, "captured_uptime_ms"));
+    /* Fase 6: solo se publica la mediana de la ventana, nunca el instantaneo. */
+    if (using_production)
+        assert(cJSON_GetObjectItemCaseSensitive(root, "value")->valueint ==
+               pilot_health.occupancy_smoothed_pct);
+    last_published_value =
+        (unsigned)cJSON_GetObjectItemCaseSensitive(root, "value")->valueint;
     cJSON_Delete(root);
     if (queue_full) return ESP_ERR_NO_MEM;
     ++roi_publications;
@@ -334,6 +341,7 @@ static void reboot_ram(void) {
     }
     production_count = production_index = 0;
     using_production = false;
+    for (unsigned i = 0; i < PROD_MAX_ROI; ++i) median_reset(i);
     free(pattern); free(guard); pattern = NULL; guard = NULL;
     stage = 0; attempted_load = false; memset(&header, 0, sizeof(header));
     memset(seen_req, 0, sizeof(seen_req)); seen_next = 0;
@@ -424,6 +432,33 @@ static void test_frame_evaluator(void) {
     assert(result.value.relative_pct == 255);
     free(p); free(g);
 }
+/* Fase 6: ventana deslizante de 5 muestras. Un pico aislado no mueve la
+ * mediana; un cambio sostenido converge en 3 muestras. */
+static void test_median_window(void) {
+    unsigned slot = 0;
+    median_reset(slot);
+    assert(production_median_count[slot] == 0);
+    assert(median_push(slot, 58) == 58);
+    assert(median_push(slot, 20) == 39);   /* (20+58)/2 */
+    assert(median_push(slot, 53) == 53);
+    assert(median_push(slot, 56) == 54);   /* (53+56)/2 */
+    assert(median_push(slot, 100) == 56);
+    assert(production_median_count[slot] == PROD_MEDIAN_SAMPLES);
+    /* La ventana ya esta llena: entra 0, sale 58. */
+    assert(median_push(slot, 0) == 53);
+    assert(median_push(slot, 0) == 53);
+    assert(median_push(slot, 0) == 0);
+    assert(median_push(slot, 0) == 0);
+    assert(median_push(slot, 0) == 0);
+    /* Reinicio de ventana (calibracion nueva): no arrastra historia. */
+    median_reset(slot);
+    assert(production_median_count[slot] == 0);
+    assert(median_push(slot, 7) == 7);
+    assert(median_push(slot, 255) == 131); /* valor fuera de rango: solo se
+                                            * promedia, nunca se publica asi */
+    median_reset(slot);
+}
+
 int main(void) {
     strcpy(active.roi_id, "20000000-0000-0000-0000-000000000001");
     strcpy(active.calibration_id, "30000000-0000-0000-0000-000000000001");
@@ -431,6 +466,7 @@ int main(void) {
     active.config_version = 16; active.calibration_version = 2;
     active.has_empty = active.has_full = true;
     assert(vision_trial_init() == ESP_OK);
+    test_median_window();
     image(false, false);
     submit(1, 1, "empty", true); assert(stage == 0 && !frames);
     submit(2, 1, "sample", false); assert(!strcmp(last_status, "calibration_required"));
@@ -773,6 +809,11 @@ int main(void) {
     automatic_frame();
     assert(using_production && production_count == 2 && pilot_health.valid);
     assert(roi_publications == 1);
+    /* Fase 6: la primera muestra vale por si misma; no arranca en cero falso. */
+    assert(pilot_health.median_samples == 1);
+    assert(pilot_health.occupancy_pct == 0);
+    assert(pilot_health.occupancy_smoothed_pct == 0);
+    assert(last_published_value == 0);
     unsigned kernel_after_load = kernel_reads;
     automatic_frame();
     assert(pilot_health.valid && roi_publications == 2);
@@ -787,9 +828,15 @@ int main(void) {
     automatic_frame();
     assert(roi_publications == 3);
     clock_us += PROD_PUBLISH_US;
+    unsigned window_before_stale[PROD_MAX_ROI];
+    for (unsigned i = 0; i < PROD_MAX_ROI; ++i)
+        window_before_stale[i] = production_median_count[i];
     stale = true;
     automatic_frame();
     assert(!pilot_health.valid && roi_publications == 3);
+    /* Un rechazo no aporta muestra ni vacia la ventana. */
+    for (unsigned i = 0; i < PROD_MAX_ROI; ++i)
+        assert(production_median_count[i] == window_before_stale[i]);
     stale = false;
     /* Invalid first ROI must not block the second slot. */
     roi_shift = .01f;
@@ -807,6 +854,26 @@ int main(void) {
     automatic_frame();
     assert(using_production && pilot_health.valid);
     assert(roi_publications == before_revision + 1);
+    /* Fase 6: un pico aislado de 100 % no se publica; manda la mediana.
+     * Primero se llena la ventana de ambos slots con lecturas vacias. */
+    for (unsigned i = 0; i < 2U * PROD_MEDIAN_SAMPLES; ++i) automatic_frame();
+    assert(production_median_count[0] == PROD_MEDIAN_SAMPLES);
+    assert(production_median_count[1] == PROD_MEDIAN_SAMPLES);
+    assert(pilot_health.occupancy_smoothed_pct == 0);
+    unsigned published_before_spike = roi_publications;
+    clock_us += PROD_PUBLISH_US;
+    image(true, false);
+    unsigned spikes = 0;
+    for (unsigned i = 0; i < 2; ++i) {
+        unsigned before_frame = roi_publications;
+        automatic_frame();
+        assert(pilot_health.valid);
+        spikes += pilot_health.occupancy_pct == 100;
+        assert(pilot_health.occupancy_smoothed_pct == 0);
+        if (roi_publications != before_frame) assert(last_published_value == 0);
+    }
+    assert(spikes == 1); /* solo la ROI que cubre la imagen llena mide 100 */
+    assert(roi_publications > published_before_spike);
     production_fixture = false;
     extra_roi = false;
     reboot_ram();

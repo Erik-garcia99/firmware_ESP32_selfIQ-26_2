@@ -66,6 +66,14 @@ static int64_t pilot_load_checked_us;
  * experimental (selfiq_vexp) queda solo para diagnostico. */
 #define PROD_MAX_ROI 2U
 #define PROD_PUBLISH_US 10000000LL
+/* Fase 6: mediana de las ultimas N mediciones validas por ROI. Filtra el ruido
+ * de +/-5 puntos del valor instantaneo. La ventana se reinicia al recargar la
+ * referencia (calibracion nueva) y NO conserva lecturas ante rechazos: si el
+ * frame o el contexto se rechazan no entra muestra y no se publica. */
+#define PROD_MEDIAN_SAMPLES 5U
+static uint8_t production_median[PROD_MAX_ROI][PROD_MEDIAN_SAMPLES];
+static uint8_t production_median_count[PROD_MAX_ROI];
+static uint8_t production_median_next[PROD_MAX_ROI];
 static int64_t production_published_us[PROD_MAX_ROI];
 static int64_t production_attempt_us[PROD_MAX_ROI];
 static uint32_t production_published, production_queue_rejected;
@@ -643,6 +651,41 @@ static void pilot_reject(const char *status, bool missing) {
     else ++pilot_health.context_rejected;
 }
 
+static void median_reset(unsigned slot) {
+    if (slot >= PROD_MAX_ROI) return;
+    memset(production_median[slot], 0, sizeof(production_median[slot]));
+    production_median_count[slot] = 0;
+    production_median_next[slot] = 0;
+}
+
+/* Inserta una muestra valida y devuelve la mediana de la ventana. N<=5, sin
+ * memoria dinamica ni libm; con ventana par se promedian las dos centrales
+ * hacia abajo. Con una sola muestra devuelve esa muestra (el piloto no arranca
+ * con un cero inventado). */
+static uint8_t median_push(unsigned slot, uint8_t value) {
+    if (slot >= PROD_MAX_ROI) return value;
+    uint8_t *samples = production_median[slot];
+    unsigned count = production_median_count[slot];
+    samples[production_median_next[slot]] = value;
+    production_median_next[slot] =
+        (uint8_t)((production_median_next[slot] + 1U) % PROD_MEDIAN_SAMPLES);
+    if (count < PROD_MEDIAN_SAMPLES) ++count;
+    production_median_count[slot] = (uint8_t)count;
+    uint8_t sorted[PROD_MEDIAN_SAMPLES];
+    for (unsigned i = 0; i < count; ++i) sorted[i] = samples[i];
+    for (unsigned i = 1; i < count; ++i) {
+        uint8_t current = sorted[i];
+        unsigned j = i;
+        while (j > 0 && sorted[j - 1] > current) {
+            sorted[j] = sorted[j - 1];
+            --j;
+        }
+        sorted[j] = current;
+    }
+    if (count & 1U) return sorted[count / 2U];
+    return (uint8_t)((sorted[count / 2U - 1U] + sorted[count / 2U]) / 2U);
+}
+
 static bool pilot_load_production(void) {
     roi_blob_t snapshot;
     if (!roi_store_snapshot(&snapshot) || !snapshot.count) return false;
@@ -654,6 +697,7 @@ static bool pilot_load_production(void) {
     production_count = 0;
     production_index = 0;
     using_production = false;
+    for (unsigned i = 0; i < PROD_MAX_ROI; ++i) median_reset(i);
     if (!allocate()) return false;
     for (size_t i = 0; i < snapshot.count && production_count < PROD_MAX_ROI; ++i) {
         cal_store_pair_t pair;
@@ -748,6 +792,7 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
         }
         production_count = 0;
         production_index = 0;
+        for (unsigned i = 0; i < PROD_MAX_ROI; ++i) median_reset(i);
         stage = 0;
         memset(&header, 0, sizeof(header));
         free(pattern); pattern = NULL;
@@ -862,7 +907,15 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
     ++pilot_health.accepted;
     pilot_health.guard_warn += result.guard_warn ? 1U : 0U;
     pilot_health.valid = true;
+    /* occupancy_pct es la lectura instantanea (diagnostico). El valor que sale
+     * al telemetry es la mediana de la ventana de produccion. */
     pilot_health.occupancy_pct = result.value.relative_pct;
+    pilot_health.occupancy_smoothed_pct = result.value.relative_pct;
+    if (using_production) {
+        pilot_health.occupancy_smoothed_pct =
+            median_push(slot, result.value.relative_pct);
+        pilot_health.median_samples = production_median_count[slot];
+    }
     pilot_health.relative_unclamped_q8 = result.value.relative_unclamped_q8;
     pilot_health.captured_us = input.captured_us;
     /* Only production results can enter the durable-receipt MQTT queue.
@@ -873,11 +926,12 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
          now - production_published_us[slot] >= PROD_PUBLISH_US) &&
         (!production_attempt_us[slot] ||
          now - production_attempt_us[slot] >= 1000000)) {
+        uint8_t published = pilot_health.occupancy_smoothed_pct;
         char data[224];
         int n = snprintf(data, sizeof(data),
             "{\"roi_id\":\"%s\",\"value\":%u,\"config_version\":%lu,"
             "\"calibration_version\":%lu,\"captured_uptime_ms\":%llu}",
-            production_roi_id[slot], (unsigned)result.value.relative_pct,
+            production_roi_id[slot], (unsigned)published,
             (unsigned long)production_binding[slot].config_version,
             (unsigned long)production_binding[slot].calibration_version,
             (unsigned long long)(input.captured_us / 1000));
@@ -886,11 +940,13 @@ static void pilot_process(const camera_fb_t *frame, int64_t now) {
             mqtt_queue_json("roi_occ", data) == ESP_OK) {
             production_published_us[slot] = now;
             ++production_published;
-            ESP_LOGI(TAG, "ROI_OCC_QUEUED: roi=%s cfg=%lu cal=%lu pct=%u",
+            ESP_LOGI(TAG, "ROI_OCC_QUEUED: roi=%s cfg=%lu cal=%lu pct=%u "
+                     "raw=%u samples=%u",
                      production_roi_id[slot],
                      (unsigned long)production_binding[slot].config_version,
                      (unsigned long)production_binding[slot].calibration_version,
-                     (unsigned)result.value.relative_pct);
+                     (unsigned)published, (unsigned)result.value.relative_pct,
+                     (unsigned)pilot_health.median_samples);
         } else ++production_queue_rejected;
     }
 }
@@ -900,6 +956,8 @@ void vision_pilot_process_frame(const camera_fb_t *frame) {
     ++pilot_health.frames;
     pilot_health.valid = false;
     pilot_health.occupancy_pct = 255;
+    pilot_health.occupancy_smoothed_pct = 255;
+    pilot_health.median_samples = 0;
     pilot_health.relative_unclamped_q8 = 0;
     pilot_health.matched = pilot_health.informative = 0;
     pilot_health.captured_us = 0;
@@ -924,13 +982,16 @@ void vision_pilot_health_log(uint32_t stack_min_free) {
     vision_pilot_health_t h;
     vision_pilot_health(&h);
     ESP_LOGI(TAG, "E3_PILOT: roi=%s cfg=%lu cal=%lu status=%s valid=%u pct=%d "
-             "raw_q8=%lu guard=%lu/%lu guard_warn=%lu frames=%lu accepted=%lu "
+             "smooth=%d samples=%u raw_q8=%lu guard=%lu/%lu guard_warn=%lu "
+             "frames=%lu accepted=%lu "
              "rejected=%lu frame_rej=%lu clip_rej=%lu bg_rej=%lu weak_rej=%lu "
              "ctx_rej=%lu refs_missing=%lu other_roi_skips=%lu us=%lu max_us=%lu "
              "stack_min=%lu source=%s publication=prod_only queued=%lu queue_rej=%lu",
              h.roi_id[0] ? h.roi_id : "-", (unsigned long)h.config_version,
              (unsigned long)h.calibration_version, h.status, (unsigned)h.valid,
              h.valid ? (int)h.occupancy_pct : -1,
+             h.occupancy_smoothed_pct == 255 ? -1 : (int)h.occupancy_smoothed_pct,
+             (unsigned)h.median_samples,
              (unsigned long)h.relative_unclamped_q8, (unsigned long)h.matched,
              (unsigned long)h.informative, (unsigned long)h.guard_warn,
              (unsigned long)h.frames,
